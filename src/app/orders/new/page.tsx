@@ -92,6 +92,7 @@ export default function NewOrderPage() {
   const ivaDesglosado = itemsOriginal !== null
 
   const processPDFRef = useRef<((file: File) => Promise<void>) | null>(null)
+  const dragCountRef = useRef(0)
 
   const setField = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }))
 
@@ -200,7 +201,6 @@ export default function NewOrderPage() {
         requiresValidation: (p.fieldsRequiringValidation?.length || 0) > 0,
       }))
 
-      setTab('manual')
     } catch {
       setError('Error procesando PDF')
     } finally {
@@ -212,18 +212,31 @@ export default function NewOrderPage() {
   processPDFRef.current = processPDFFile
 
   useEffect(() => {
+    const onDragEnter = (e: DragEvent) => {
+      e.preventDefault()
+      dragCountRef.current++
+      if (dragCountRef.current === 1) setIsDragging(true)
+    }
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      dragCountRef.current--
+      if (dragCountRef.current === 0) setIsDragging(false)
+    }
     const onDragOver = (e: DragEvent) => e.preventDefault()
     const onDrop = (e: DragEvent) => {
       e.preventDefault()
+      dragCountRef.current = 0
+      setIsDragging(false)
       const file = e.dataTransfer?.files?.[0]
-      if (file) {
-        setTab('pdf')
-        processPDFRef.current?.(file)
-      }
+      if (file) processPDFRef.current?.(file)
     }
+    window.addEventListener('dragenter', onDragEnter)
+    window.addEventListener('dragleave', onDragLeave)
     window.addEventListener('dragover', onDragOver)
     window.addEventListener('drop', onDrop)
     return () => {
+      window.removeEventListener('dragenter', onDragEnter)
+      window.removeEventListener('dragleave', onDragLeave)
       window.removeEventListener('dragover', onDragOver)
       window.removeEventListener('drop', onDrop)
     }
@@ -258,43 +271,30 @@ export default function NewOrderPage() {
 
   return (
     <div className="p-6 max-w-5xl space-y-5">
-      <h1 className="text-2xl font-bold text-gray-900">Nueva Orden de Compra</h1>
 
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
-        <button onClick={() => setTab('manual')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'manual' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
-          Ingreso Manual
-        </button>
-        <button onClick={() => setTab('pdf')} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === 'pdf' ? 'bg-white shadow text-gray-900' : 'text-gray-600'}`}>
-          Subir PDF
-        </button>
-      </div>
-
-      {/* PDF Upload zone */}
-      {tab === 'pdf' && (
-        <div
-          onClick={() => fileRef.current?.click()}
-          onDrop={e => { e.preventDefault(); setIsDragging(false) }}
-          onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
-          onDragEnter={e => { e.preventDefault(); setIsDragging(true) }}
-          onDragLeave={e => { e.preventDefault(); setIsDragging(false) }}
-          className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-500 bg-blue-100' : 'border-blue-300 hover:bg-blue-50'}`}
-        >
-          <input ref={fileRef} type="file" accept=".pdf" onChange={handlePDF} className="hidden" />
-          {pdfLoading ? (
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
-              <p className="text-sm text-blue-600 font-medium">Leyendo OC...</p>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-3">
-              <Upload className="h-10 w-10 text-blue-400" />
-              <p className="text-sm font-medium text-gray-700">Haz clic o arrastra el PDF de la OC aquí</p>
-              <p className="text-xs text-gray-400">Extrae automáticamente todos los datos de la orden</p>
-            </div>
-          )}
+      {/* Overlay pantalla completa al arrastrar */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-white rounded-2xl shadow-2xl border-4 border-blue-500 border-dashed p-16 flex flex-col items-center gap-4">
+            <Upload className="h-16 w-16 text-blue-500" />
+            <p className="text-2xl font-bold text-blue-700">Suelta el PDF aquí</p>
+            <p className="text-sm text-gray-500">Se extraerán todos los datos de la OC automáticamente</p>
+          </div>
         </div>
       )}
+
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-gray-900">Nueva Orden de Compra</h1>
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="flex items-center gap-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          <Upload className="h-4 w-4" />
+          Subir PDF
+        </button>
+        <input ref={fileRef} type="file" accept=".pdf" onChange={handlePDF} className="hidden" />
+      </div>
 
       {/* Alertas PDF */}
       {pdfResult && pdfResult.fieldsRequiringValidation?.length > 0 && (
