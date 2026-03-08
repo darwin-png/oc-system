@@ -44,9 +44,11 @@ export interface ParsedOC {
 }
 
 export interface ParsedProduct {
+  lineNumber?: number
   productCode?: string   // Código en paréntesis: (4220418)
   licitacionId?: string  // ID Licitación CM: 2239-9-LR24
   productName: string
+  description?: string   // Descripción completa ESP. COMPRADOR (multilínea colapsada)
   quantity: number
   unitPrice: number
   totalPrice: number
@@ -86,12 +88,20 @@ function normalizeDate(str: string): string {
 
 function cleanProductName(name: string): string {
   return name
-    .replace(/^\(\d+\)\s*/, '')
-    .replace(/\s{2,}/g, ' ')
-    .replace(/;.*$/, '')
-    .replace(/Regi[oó]n de.*/i, '')
-    .replace(/UNIDAD [IVX]+ REGI[OÓ]N\s*$/i, '')
+    .replace(/\n/g, ' ')                                      // colapsar saltos de línea
+    .replace(/^\(\d+\)\s*/, '')                               // quitar código al inicio
+    .replace(/;[\s\S]*$/, '')                                 // quitar desde primer punto y coma
+    .replace(/\s*REGI[OÓ]N\s+RM\s*$/i, '')                  // quitar "REGIÓN RM"
+    .replace(/\s*REGI[OÓ]N\s+DE\s+[A-ZÁÉÍÓÚÑ\s,]{2,}$/i, '') // quitar "REGIÓN DE ..."
+    .replace(/\s*REGI[OÓ]N\s+[IVX]+\s*$/i, '')              // quitar "REGIÓN IV"
+    .replace(/\s*UNIDAD\s+[IVX]+\s+REGI[OÓ]N\s*$/i, '')     // quitar "UNIDAD IV REGIÓN"
+    .replace(/\s{2,}/g, ' ')                                   // colapsar espacios extra
     .trim()
+}
+
+function extractUnit(desc: string): string {
+  const m = desc.match(/\b(ROLLO|CAJA|PAQUETE|FRASCO|TUBO|PAR|SET|BOLSA|LITRO|LT|KG|MT|GL|M2|M3|UNIDAD|UNIDADES|UN)\b/i)
+  return m ? m[1].toUpperCase() : 'UN'
 }
 
 export function parsePDFText(rawText: string): ParsedOC {
@@ -291,6 +301,14 @@ export function parsePDFText(rawText: string): ParsedOC {
   // ─── PRODUCTOS ────────────────────────────────────────────────────────────
   result.products = parseProducts(text)
 
+  // Si no se encontró totalNet desde el texto, calcularlo desde los productos
+  if (!result.totalNet && result.products.length > 0) {
+    result.totalNet = result.products.reduce((s, p) => s + p.totalPrice, 0)
+  }
+  if (!result.totalFinal && result.totalNet) {
+    result.totalFinal = result.totalNet + (result.iva ?? Math.round(result.totalNet * 0.19))
+  }
+
   // ─── Validación ───────────────────────────────────────────────────────────
   if (!result.ocNumber) result.fieldsRequiringValidation.push('ocNumber')
   if (!result.buyerName) result.fieldsRequiringValidation.push('buyerName')
@@ -320,53 +338,67 @@ function strategyA_codes(text: string): ParsedProduct[] {
   const seen = new Set<string>()
   const codePattern = /\((\d{6,8})\)/g
   let m: RegExpExecArray | null
+  let lineNumber = 0
 
   while ((m = codePattern.exec(text)) !== null) {
     const code = m[1]
     const codeStart = m.index
     const codeEnd = codeStart + m[0].length
 
-    // Nombre: texto inmediatamente después del código en la misma línea
-    const afterCodeLine = text.slice(codeEnd, codeEnd + 300)
-    const nameFromCode = afterCodeLine.match(/^([^\n;(]{3,})/)
-    const nameEspComprador = nameFromCode ? cleanProductName(nameFromCode[1]) : ''
+    // ── Nombre multilínea ──────────────────────────────────────────────────
+    // Capturar todo el bloque de texto después del código hasta llegar a
+    // una línea que empieza con un número (la línea de precios).
+    const afterCodeSlice = text.slice(codeEnd, codeEnd + 700)
+    const multilineMatch =
+      afterCodeSlice.match(/^([\s\S]+?)(?=\n\s*\d{1,3}(?:\.\d{3})*,\d{2})/) ||  // hasta "1.234,56"
+      afterCodeSlice.match(/^([\s\S]+?)(?=\n\s*\d+,\d{2})/) ||                   // hasta "1234,56"
+      afterCodeSlice.match(/^([^\n;(]{3,})/)                                       // fallback: solo primera línea
+
+    const rawName = multilineMatch ? multilineMatch[1] : ''
+    const nameEspComprador = cleanProductName(rawName)
     if (nameEspComprador.length < 3) continue
 
-    // Cantidad: número que precede al código
+    // ── Cantidad ───────────────────────────────────────────────────────────
     const beforeCode = text.slice(Math.max(0, codeStart - 200), codeStart)
     const qtyM = beforeCode.match(/(\d{1,4})\s*$/)
     if (!qtyM) continue
     const qty = parseInt(qtyM[1])
     if (qty <= 0 || qty >= 10000) continue
 
-    // Nombre de columna "Producto" (texto en mayúsculas antes de la cantidad)
+    // ── Nombre columna "Producto" (mayúsculas antes de la cantidad) ────────
     const beforeQty = beforeCode.slice(0, beforeCode.length - qtyM[0].length)
     const productColM = beforeQty.match(/([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,\-\.\/]{4,})\s*$/)
     const productName = productColM ? cleanProductName(productColM[1]) : nameEspComprador
 
-    // Precio: buscar en los próximos 800 chars
-    // Acepta: PRECIO DESCUENTO CARGO TOTAL (cualquier valor en descuento/cargo)
-    const afterCode = text.slice(codeEnd, codeEnd + 800)
-    const priceM = afterCode.match(/([\d.]+,\d{2})\s+[\d.,]+\s+[\d.,]+\s+([\d.]+,\d{2})/)
-      || afterCode.match(/([\d.]{3,})\s+[\d.,]+\s+[\d.,]+\s+([\d.]{3,})/)
-      // Fallback: solo dos números seguidos (precio unit y total)
-      || afterCode.match(/([\d.]+,\d{2})\s+([\d.]+,\d{2})/)
+    // ── Precio ─────────────────────────────────────────────────────────────
+    // Buscar en 1200 chars (nombre puede ser largo en PDFs multilínea)
+    const afterCode = text.slice(codeEnd, codeEnd + 1200)
+    const priceM =
+      afterCode.match(/([\d.]+,\d{2})\s+[\d.,]+\s+[\d.,]+\s+([\d.]+,\d{2})/) ||  // precio dcto cargo total
+      afterCode.match(/([\d.]{3,})\s+[\d.,]+\s+[\d.,]+\s+([\d.]{3,})/) ||          // sin coma decimal
+      afterCode.match(/([\d.]+,\d{2})\s+([\d.]+,\d{2})/)                            // solo precio y total
 
     if (!priceM) continue
     const unitPrice = parseChileanNumber(priceM[1])
     const total = parseChileanNumber(priceM[2])
     if (unitPrice <= 0 || unitPrice > 1_000_000_000) continue
 
+    // ── Descripción limpia (multilínea colapsada, sin región) ──────────────
+    const description = rawName.replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim()
+
     const key = `${code}-${qty}`
     if (!seen.has(key)) {
       seen.add(key)
+      lineNumber++
       products.push({
+        lineNumber,
         productCode: code,
         productName: productName.length > 3 ? productName : nameEspComprador,
+        description,
         quantity: qty,
         unitPrice,
         totalPrice: total || qty * unitPrice,
-        unit: 'UN',
+        unit: extractUnit(description),
         discount: 0,
       })
     }

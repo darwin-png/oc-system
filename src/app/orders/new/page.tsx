@@ -8,6 +8,7 @@ import { Upload, Plus, Trash2, AlertCircle, CheckCircle, Loader2, Calculator, Sp
 interface ProductRow {
   productCode: string
   productName: string
+  description?: string
   quantity: number
   unitPrice: number
   totalPrice: number
@@ -164,6 +165,7 @@ export default function NewOrderPage() {
         ? p.products.map((prod: any) => ({
             productCode: prod.productCode || '',
             productName: prod.productName || '',
+            description: prod.description || '',
             quantity: Number(prod.quantity) || 1,
             unitPrice: Number(prod.unitPrice) || 0,
             totalPrice: Number(prod.totalPrice) || Math.round((Number(prod.quantity) || 1) * (Number(prod.unitPrice) || 0)),
