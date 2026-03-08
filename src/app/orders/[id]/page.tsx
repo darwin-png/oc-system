@@ -6,7 +6,7 @@ import OrderStatusBadge from '@/components/orders/OrderStatusBadge'
 import { formatCurrency, formatDate, STATUS_LABELS } from '@/lib/utils'
 import { OrderStatus } from '@/types'
 import {
-  ArrowLeft, CheckCircle, AlertTriangle, Plus, X
+  ArrowLeft, CheckCircle, AlertTriangle, Plus, X, Truck, PackageCheck, ChevronDown, ChevronUp
 } from 'lucide-react'
 
 const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
@@ -38,6 +38,9 @@ export default function OrderDetailPage() {
   const [updating, setUpdating] = useState(false)
   const [showDeliveryForm, setShowDeliveryForm] = useState(false)
   const [delivery, setDelivery] = useState({ scheduledDate: '', transportist: '', route: '', notes: '', items: [] as any[] })
+  const [confirmingDelivery, setConfirmingDelivery] = useState<string | null>(null)
+  const [confirmItems, setConfirmItems] = useState<any[]>([])
+  const [expandedDelivery, setExpandedDelivery] = useState<string | null>(null)
 
   useEffect(() => { fetchOrder() }, [params.id])
 
@@ -81,6 +84,44 @@ export default function OrderDetailPage() {
       setShowDeliveryForm(false)
       await fetchOrder()
     }
+    setUpdating(false)
+  }
+
+  async function markEnRoute(deliveryId: string) {
+    setUpdating(true)
+    await fetch(`/api/orders/${order.id}/deliveries/${deliveryId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'EN_RUTA' }),
+    })
+    await fetchOrder()
+    setUpdating(false)
+  }
+
+  function startConfirm(d: any) {
+    setConfirmingDelivery(d.id)
+    setConfirmItems(d.items.map((item: any) => ({
+      deliveryItemId: item.id,
+      productName: order.items?.find((oi: any) => oi.id === item.orderItemId)?.productName || item.orderItemId,
+      quantity: item.quantity,
+      delivered: item.quantity,
+      missing: 0,
+    })))
+  }
+
+  async function confirmDelivery(deliveryId: string) {
+    setUpdating(true)
+    await fetch(`/api/orders/${order.id}/deliveries/${deliveryId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'ENTREGADA',
+        deliveredDate: new Date().toISOString(),
+        items: confirmItems,
+      }),
+    })
+    setConfirmingDelivery(null)
+    await fetchOrder()
     setUpdating(false)
   }
 
@@ -290,28 +331,162 @@ export default function OrderDetailPage() {
           </div>
           <div className="divide-y">
             {order.deliveries.map((d: any) => (
-              <div key={d.id} className="px-4 py-3 flex items-center gap-4 text-sm">
-                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center">
-                  {d.deliveryNumber}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">Entrega #{d.deliveryNumber}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      d.status === 'ENTREGADA' ? 'bg-green-100 text-green-700' :
-                      d.status === 'EN_RUTA' ? 'bg-sky-100 text-sky-700' :
-                      'bg-gray-100 text-gray-600'
-                    }`}>{d.status}</span>
+              <div key={d.id}>
+                {/* Delivery header row */}
+                <div className="px-4 py-3 flex items-center gap-3 text-sm">
+                  <div className={`w-8 h-8 rounded-full font-bold text-xs flex items-center justify-center shrink-0 ${
+                    d.status === 'ENTREGADA' ? 'bg-green-100 text-green-700' :
+                    d.status === 'EN_RUTA' ? 'bg-sky-100 text-sky-700' :
+                    'bg-blue-100 text-blue-700'
+                  }`}>
+                    {d.deliveryNumber}
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {d.scheduledDate && `Programada: ${formatDate(d.scheduledDate)}`}
-                    {d.transportist && ` · ${d.transportist}`}
-                    {d.route && ` · Ruta: ${d.route}`}
-                  </p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium">Entrega #{d.deliveryNumber}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${
+                        d.status === 'ENTREGADA' ? 'bg-green-100 text-green-700' :
+                        d.status === 'EN_RUTA' ? 'bg-sky-100 text-sky-700' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>{d.status}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">
+                      {d.scheduledDate && `Programada: ${formatDate(d.scheduledDate)}`}
+                      {d.deliveredDate && ` · Entregada: ${formatDate(d.deliveredDate)}`}
+                      {d.transportist && ` · ${d.transportist}`}
+                      {d.route && ` · Ruta: ${d.route}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Action buttons */}
+                    {d.status === 'PROGRAMADA' && (
+                      <button
+                        onClick={() => markEnRoute(d.id)}
+                        disabled={updating}
+                        className="flex items-center gap-1 text-xs bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        <Truck className="h-3.5 w-3.5" /> En Ruta
+                      </button>
+                    )}
+                    {(d.status === 'PROGRAMADA' || d.status === 'EN_RUTA') && (
+                      <button
+                        onClick={() => confirmingDelivery === d.id ? setConfirmingDelivery(null) : startConfirm(d)}
+                        disabled={updating}
+                        className="flex items-center gap-1 text-xs bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 px-2.5 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+                      >
+                        <PackageCheck className="h-3.5 w-3.5" /> Confirmar
+                      </button>
+                    )}
+                    {/* Toggle items */}
+                    <button
+                      onClick={() => setExpandedDelivery(expandedDelivery === d.id ? null : d.id)}
+                      className="text-gray-400 hover:text-gray-600 p-1"
+                    >
+                      {expandedDelivery === d.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </button>
+                  </div>
                 </div>
-                <div className="text-right text-xs text-gray-400">
-                  {d.items?.length || 0} productos
-                </div>
+
+                {/* Expanded items list */}
+                {expandedDelivery === d.id && (
+                  <div className="border-t bg-gray-50 px-4 py-3">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-500 border-b">
+                          <th className="text-left pb-1.5 font-medium">Producto</th>
+                          <th className="text-right pb-1.5 font-medium w-24">Programado</th>
+                          <th className="text-right pb-1.5 font-medium w-24">Entregado</th>
+                          <th className="text-right pb-1.5 font-medium w-24">Faltante</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {d.items?.map((item: any) => {
+                          const orderItem = order.items?.find((oi: any) => oi.id === item.orderItemId)
+                          return (
+                            <tr key={item.id} className="text-gray-700">
+                              <td className="py-1.5">{orderItem?.productName || '—'}</td>
+                              <td className="py-1.5 text-right">{item.quantity}</td>
+                              <td className={`py-1.5 text-right font-medium ${item.delivered > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+                                {d.status === 'ENTREGADA' ? item.delivered : '—'}
+                              </td>
+                              <td className={`py-1.5 text-right font-medium ${item.missing > 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                                {d.status === 'ENTREGADA' ? item.missing : '—'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                    {d.notes && <p className="text-xs text-gray-500 mt-2">Nota: {d.notes}</p>}
+                  </div>
+                )}
+
+                {/* Confirm delivery form */}
+                {confirmingDelivery === d.id && (
+                  <div className="border-t bg-blue-50 px-4 py-4 space-y-3">
+                    <p className="text-sm font-semibold text-blue-800">Confirmar Entrega #{d.deliveryNumber}</p>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-500 border-b border-blue-200">
+                          <th className="text-left pb-1.5 font-medium">Producto</th>
+                          <th className="text-right pb-1.5 font-medium w-24">Programado</th>
+                          <th className="text-right pb-1.5 font-medium w-28">Entregado</th>
+                          <th className="text-right pb-1.5 font-medium w-28">Faltante</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-blue-100">
+                        {confirmItems.map((item, i) => (
+                          <tr key={item.deliveryItemId}>
+                            <td className="py-1.5 text-gray-700">{item.productName}</td>
+                            <td className="py-1.5 text-right text-gray-500">{item.quantity}</td>
+                            <td className="py-1.5 text-right">
+                              <input
+                                type="number" min="0" max={item.quantity}
+                                value={item.delivered}
+                                onChange={e => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  const next = [...confirmItems]
+                                  next[i] = { ...next[i], delivered: val, missing: Math.max(0, item.quantity - val) }
+                                  setConfirmItems(next)
+                                }}
+                                className="w-20 px-2 py-0.5 border rounded text-right bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                            </td>
+                            <td className="py-1.5 text-right">
+                              <input
+                                type="number" min="0" max={item.quantity}
+                                value={item.missing}
+                                onChange={e => {
+                                  const val = parseFloat(e.target.value) || 0
+                                  const next = [...confirmItems]
+                                  next[i] = { ...next[i], missing: val }
+                                  setConfirmItems(next)
+                                }}
+                                className="w-20 px-2 py-0.5 border rounded text-right bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        onClick={() => confirmDelivery(d.id)}
+                        disabled={updating}
+                        className="flex items-center gap-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-60"
+                      >
+                        <PackageCheck className="h-3.5 w-3.5" />
+                        {updating ? 'Guardando...' : 'Confirmar Entrega'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmingDelivery(null)}
+                        className="text-xs px-4 py-2 border rounded-lg text-gray-600 hover:bg-gray-100 transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
