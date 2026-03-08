@@ -29,6 +29,7 @@ model Order {
   buyerName            String
   buyerRut             String
   buyerInstitution     String?
+  buyerPhone           String?
   deliveryAddress      String
   deliveryCity         String?
   deliveryRegion       String?

@@ -24,6 +24,7 @@ const USER_PROMPT = `Lee esta Orden de Compra y extrae todos los datos. Devuelve
   "buyerName": "Demandante completo",
   "buyerRut": "RUT del comprador ej: 61.602.054-4",
   "buyerInstitution": "Unidad de Compra o null",
+  "buyerPhone": "Teléfono del comprador o null",
   "supplierName": "SEÑOR(ES) nombre del proveedor",
   "supplierRut": "RUT proveedor ej: 77.082.051-0",
   "supplierContact": "null",
@@ -78,7 +79,7 @@ export async function POST(req: NextRequest) {
       try {
         const client = new Anthropic({ apiKey })
         const msg = await client.messages.create({
-          model: 'claude-haiku-4-5-20251001',
+          model: 'claude-sonnet-4-6',
           max_tokens: 4096,
           system: SYSTEM_PROMPT,
           messages: [

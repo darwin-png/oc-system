@@ -68,6 +68,7 @@ export default function NewOrderPage() {
     buyerName: '',
     buyerRut: '',
     buyerInstitution: '',
+    buyerPhone: '',
     // Dirección
     deliveryAddress: '',
     deliveryCity: '',
@@ -192,6 +193,7 @@ export default function NewOrderPage() {
         buyerName: p.buyerName || '',
         buyerRut: p.buyerRut || '',
         buyerInstitution: p.buyerInstitution || '',
+        buyerPhone: p.buyerPhone || '',
         deliveryAddress: p.deliveryAddress || '',
         deliveryCity: p.deliveryCity || '',
         deliveryRegion: p.deliveryRegion || '',
@@ -432,6 +434,10 @@ export default function NewOrderPage() {
             <div>
               <label className={LABEL}>Institución</label>
               <input type="text" value={form.buyerInstitution} onChange={e => setField('buyerInstitution', e.target.value)} className={INPUT} placeholder="Servicio Nacional de Salud" />
+            </div>
+            <div>
+              <label className={LABEL}>Teléfono Comprador</label>
+              <input type="text" value={form.buyerPhone} onChange={e => setField('buyerPhone', e.target.value)} className={INPUT} placeholder="56-32-3310099" />
             </div>
           </div>
         </div>
