@@ -6,67 +6,62 @@ export const dynamic = 'force-dynamic'
 export const maxDuration = 60
 
 const SYSTEM_PROMPT = `Eres un extractor de Órdenes de Compra de Mercado Público Chile.
-Dado el texto de una OC, devuelve SOLO JSON válido con la estructura exacta indicada.
+Lee el PDF adjunto y devuelve SOLO un JSON válido con todos los datos extraídos.
 Reglas:
-- Números chilenos: 1.234.567,00 → 1234567.00 (punto=miles, coma=decimal)
+- Números chilenos: 1.234.567,00 → 1234567 (punto=miles, coma=decimal, resultado sin formato)
 - Fechas DD/MM/YYYY → YYYY-MM-DD
-- Devuelve únicamente el JSON, sin explicaciones ni markdown`
+- Devuelve únicamente el JSON, sin texto adicional ni markdown`
 
-function buildPrompt(text: string): string {
-  return `Extrae todos los datos de esta Orden de Compra chilena. Devuelve SOLO JSON válido:
+const USER_PROMPT = `Lee esta Orden de Compra y extrae todos los datos. Devuelve SOLO JSON con esta estructura exacta:
 
 {
-  "ocNumber": "número OC ej: 2239-9-LR24",
-  "ocName": "nombre de la orden o null",
+  "ocNumber": "N° de la OC ej: 1422825-761-CM25",
+  "ocName": "NOMBRE ORDEN DE COMPRA o null",
   "ocDate": "YYYY-MM-DD o null",
-  "sentDate": "YYYY-MM-DD o null",
+  "sentDate": "Fecha Envio OC en YYYY-MM-DD o null",
   "acceptanceDate": "YYYY-MM-DD o null",
-  "expectedDeliveryDate": "YYYY-MM-DD o null",
-  "buyerName": "nombre demandante",
-  "buyerRut": "RUT comprador ej: 61.603.203-k",
-  "buyerInstitution": "unidad de compra o null",
-  "supplierName": "nombre proveedor (SEÑOR(ES))",
-  "supplierRut": "RUT proveedor",
-  "supplierContact": "contacto o null",
-  "supplierPhone": "teléfono o null",
-  "supplierEmail": "email o null",
-  "deliveryAddress": "dirección de despacho",
-  "deliveryCity": "ciudad o null",
-  "deliveryRegion": "región o null",
-  "billingAddress": "dirección factura o null",
-  "paymentTerms": "forma de pago o null",
+  "expectedDeliveryDate": "FECHA ENTREGA PRODUCTOS en YYYY-MM-DD o null",
+  "buyerName": "Demandante completo",
+  "buyerRut": "RUT del comprador ej: 61.602.054-4",
+  "buyerInstitution": "Unidad de Compra o null",
+  "supplierName": "SEÑOR(ES) nombre del proveedor",
+  "supplierRut": "RUT proveedor ej: 77.082.051-0",
+  "supplierContact": "null",
+  "supplierPhone": "Teléfono o null",
+  "supplierEmail": "email factura o null",
+  "deliveryAddress": "DIRECCIONES DE DESPACHO completa",
+  "deliveryCity": "ciudad de despacho o null",
+  "deliveryRegion": "región de despacho o null",
+  "billingAddress": "DIRECCION DE ENVIO FACTURA o null",
+  "paymentTerms": "FORMA DE PAGO o null",
   "currency": "CLP",
-  "totalNet": 1000000,
+  "totalNet": 5192679,
   "discounts": 0,
-  "iva": 190000,
-  "totalFinal": 1190000,
-  "observations": "observaciones o null",
-  "deliveryRestrictions": "restricciones despacho o null",
+  "iva": 0,
+  "totalFinal": 5192679,
+  "observations": "texto de Observaciones o null",
+  "deliveryRestrictions": "texto de Observaciones del despacho o null",
   "products": [
     {
       "productCode": "código sin paréntesis ej: 4220418",
-      "productName": "nombre completo del producto SIN código ni sufijos de región",
+      "productName": "nombre completo del producto de la columna Producto, SIN sufijos de región",
       "quantity": 20,
       "unit": "UNIDAD",
-      "unitPrice": 2239,
-      "totalPrice": 44780,
+      "unitPrice": 2446,
+      "totalPrice": 48920,
       "discount": 0
     }
   ],
   "fieldsRequiringValidation": []
 }
 
-REGLAS CRÍTICAS PARA PRODUCTOS:
-- Los códigos de producto aparecen entre paréntesis: (4220418) → productCode: "4220418"
-- Extrae TODOS los productos de la tabla (puede haber 1 o muchos)
-- Convierte números chilenos: 2.239,00 → 2239 | 44.780,00 → 44780
-- El nombre del producto NO debe incluir la región ni el código
-- unitPrice es el precio por unidad, totalPrice es quantity × unitPrice
-- Si hay descuento, totalPrice puede ser menor que quantity × unitPrice
-
-TEXTO DE LA OC:
-${text.slice(0, 14000)}`
-}
+REGLAS CRÍTICAS:
+- Extrae TODOS los productos de la tabla de la OC (lee ambas páginas si las hay)
+- El código del producto está entre paréntesis en la columna "Especificaciones Comprador": (4220418) → "4220418"
+- El nombre del producto viene de la columna "Producto", sin incluir "UNIDAD V REGIÓN" ni región
+- Los números NO deben tener puntos de miles ni comas decimales en el JSON: 2.446,00 → 2446
+- unitPrice × quantity debe ser igual a totalPrice
+- Neto, IVA y Total se leen de la tabla de totales al final del documento`
 
 export async function POST(req: NextRequest) {
   try {
@@ -75,19 +70,9 @@ export async function POST(req: NextRequest) {
     if (!file) return NextResponse.json({ error: 'No se recibió archivo' }, { status: 400 })
 
     const buffer = Buffer.from(await file.arrayBuffer())
+    const pdfBase64 = buffer.toString('base64')
 
-    let text = ''
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const pdfParse = require('pdf-parse/lib/pdf-parse.js')
-      const data = await pdfParse(buffer)
-      text = data.text
-    } catch (parseError) {
-      console.error('PDF parse error:', parseError)
-      return NextResponse.json({ error: 'No se pudo leer el PDF' }, { status: 400 })
-    }
-
-    // Extracción con Claude API
+    // Extracción directa con Claude leyendo el PDF (igual que un humano lo leería)
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (apiKey) {
       try {
@@ -96,18 +81,44 @@ export async function POST(req: NextRequest) {
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 4096,
           system: SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: buildPrompt(text) }],
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'document',
+                  source: {
+                    type: 'base64',
+                    media_type: 'application/pdf',
+                    data: pdfBase64,
+                  },
+                } as Anthropic.DocumentBlockParam,
+                {
+                  type: 'text',
+                  text: USER_PROMPT,
+                },
+              ],
+            },
+          ],
         })
 
         const raw = (msg.content[0] as { type: string; text: string }).text
-        // Extraer JSON aunque venga con markdown o texto extra
         const jsonMatch =
           raw.match(/```json\n?([\s\S]+?)\n?```/) ||
           raw.match(/```\n?([\s\S]+?)\n?```/) ||
           raw.match(/(\{[\s\S]+\})/)
         const jsonStr = jsonMatch ? (jsonMatch[1] ?? jsonMatch[0]) : raw
         const parsed = JSON.parse(jsonStr)
-        return NextResponse.json({ parsed, rawText: text })
+
+        // Extraer texto para el panel debug (fallback a texto vacío si pdf-parse no está disponible)
+        let rawText = ''
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const pdfParse = require('pdf-parse/lib/pdf-parse.js')
+          rawText = (await pdfParse(buffer)).text
+        } catch { /* no crítico */ }
+
+        return NextResponse.json({ parsed, rawText })
       } catch (claudeError) {
         console.error('Claude API error, usando parser regex como fallback:', claudeError)
       }
@@ -115,7 +126,15 @@ export async function POST(req: NextRequest) {
       console.warn('ANTHROPIC_API_KEY no configurada, usando parser regex')
     }
 
-    // Fallback: parser regex
+    // Fallback: parser regex sobre texto extraído
+    let text = ''
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse/lib/pdf-parse.js')
+      text = (await pdfParse(buffer)).text
+    } catch {
+      return NextResponse.json({ error: 'No se pudo leer el PDF' }, { status: 400 })
+    }
     const parsed = parsePDFText(text)
     return NextResponse.json({ parsed, rawText: text })
   } catch (error) {
