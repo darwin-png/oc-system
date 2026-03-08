@@ -44,14 +44,19 @@ export async function POST(req: NextRequest) {
     const order = await prisma.order.create({
       data: {
         ...orderData,
-        ocDate: new Date(orderData.ocDate),
+        ocDate: new Date(orderData.ocDate || orderData.sentDate || new Date()),
         sentDate: orderData.sentDate ? new Date(orderData.sentDate) : null,
         acceptanceDate: orderData.acceptanceDate ? new Date(orderData.acceptanceDate) : null,
         expectedDeliveryDate: orderData.expectedDeliveryDate ? new Date(orderData.expectedDeliveryDate) : null,
         items: {
           create: items.map((item: any) => ({
-            ...item,
-            pendingQty: item.quantity,
+            productCode: item.productCode || null,
+            productName: item.productName,
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.unitPrice),
+            totalPrice: Number(item.totalPrice),
+            unit: item.unit || null,
+            pendingQty: Number(item.quantity),
             deliveredQty: 0,
           })),
         },
