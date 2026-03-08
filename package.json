@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && prisma db push && next build",
     "start": "next start",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
@@ -12,8 +12,7 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
-    "@netlify/plugin-nextjs": "^5.15.8",
-    "@prisma/client": "^5.10.0",
+"@prisma/client": "^5.10.0",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-label": "^2.0.2",
     "@radix-ui/react-select": "^2.0.0",

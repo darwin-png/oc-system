@@ -5,5 +5,8 @@
 [build.environment]
   NODE_VERSION = "20"
 
+[functions]
+  node_bundler = "nft"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

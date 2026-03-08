@@ -11,8 +11,10 @@ export async function POST(req: NextRequest) {
 
     let text = ''
     try {
-      // Dynamic import to avoid SSR issues
-      const pdfParse = (await import('pdf-parse')).default
+      // Usar la ruta interna del módulo evita que pdf-parse intente leer
+      // archivos de test del filesystem (falla en serverless/Netlify)
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const pdfParse = require('pdf-parse/lib/pdf-parse.js')
       const data = await pdfParse(buffer)
       text = data.text
     } catch (parseError) {
@@ -21,7 +23,7 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = parsePDFText(text)
-    return NextResponse.json({ parsed, rawText: text.slice(0, 2000) })
+    return NextResponse.json({ parsed, rawText: text })
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: 'Error al procesar PDF' }, { status: 500 })

@@ -92,7 +92,6 @@ export function parsePDFText(rawText: string): ParsedOC {
   }
 
   // ─── N° OC ───────────────────────────────────────────────────────────────
-  // Formato Mercado Público: "1422825-761-CM25"
   result.ocNumber = extract(text, [
     /N[°º]\s*:\s*(\d{5,}-\d{2,}-[A-Z]{2}\d+)/i,
     /ORDEN DE COMPRA\s+N[°º]\s*:\s*(\S+)/i,
@@ -109,25 +108,55 @@ export function parsePDFText(rawText: string): ParsedOC {
   if (rawDate) result.ocDate = normalizeDate(rawDate)
 
   // ─── Organismo comprador (Demandante) ─────────────────────────────────────
+  // "Demandante :" aparece en la columna derecha del encabezado.
+  // NO usar SEÑOR(ES) como fallback: ese es el proveedor.
   result.buyerName = extract(text, [
-    /Demandante\s*:\s*([A-ZÁÉÍÓÚÑ][^\n]{5,})/,
-    /SEÑOR\s*\(ES\)\s*:\s*([^\n]+)/i,
+    /Demandante\s*:\s*([^\n\r]{5,})/i,
   ])
   if (result.buyerName) {
     result.buyerName = result.buyerName
       .replace(/Unidad de Compra.*/i, '')
+      .replace(/Direcci[oó]n.*/i, '')
       .split('\n')[0]
       .trim()
   }
 
-  // ─── RUTs (el primero es el comprador, el segundo es el proveedor) ────────
-  const rutMatches = [...text.matchAll(/(\d{1,2}\.?\d{3}\.?\d{3}[-–][\dkK])/g)]
-  if (rutMatches.length >= 1) result.buyerRut = rutMatches[0][1]
-  if (rutMatches.length >= 2) result.supplierRut = rutMatches[1][1]
+  // ─── RUTs ─────────────────────────────────────────────────────────────────
+  // En el PDF de Mercado Público:
+  //   - RUT comprador (demandante): aparece con etiqueta "Rut :" en el encabezado,
+  //     cerca de "Demandante :"
+  //   - RUT proveedor: aparece con etiqueta "RUT :" en el cuerpo, después de "SEÑOR(ES) :"
+  //
+  // Estrategia: buscar cada RUT en su contexto específico.
+
+  // Buyer RUT: buscar en el contexto de "Demandante"
+  const demandanteIdx = text.search(/Demandante\s*:/i)
+  if (demandanteIdx > -1) {
+    const ctx = text.slice(Math.max(0, demandanteIdx - 400), demandanteIdx + 200)
+    const m = ctx.match(/Rut\s*:\s*(\d{1,2}\.?\d{3}\.?\d{3}[-–][\dkK])/i)
+      || ctx.match(/(\d{1,2}\.\d{3}\.\d{3}[-–][\dkK])/)
+    if (m) result.buyerRut = m[1]
+  }
+
+  // Supplier RUT: buscar después de "SEÑOR(ES) :"
+  const senorIdx = text.search(/SE[ÑN]OR\s*\(ES\)\s*:/i)
+  if (senorIdx > -1) {
+    const ctx = text.slice(senorIdx, senorIdx + 500)
+    const m = ctx.match(/RUT\s*:\s*(\d{1,2}\.?\d{3}\.?\d{3}[-–][\dkK])/i)
+      || ctx.match(/(\d{1,2}\.\d{3}\.\d{3}[-–][\dkK])/)
+    if (m) result.supplierRut = m[1]
+  }
+
+  // Fallback genérico si no se encontraron por contexto
+  if (!result.buyerRut || !result.supplierRut) {
+    const rutMatches = [...text.matchAll(/(\d{1,2}\.?\d{3}\.?\d{3}[-–][\dkK])/g)]
+    if (!result.buyerRut && rutMatches.length >= 1) result.buyerRut = rutMatches[0][1]
+    if (!result.supplierRut && rutMatches.length >= 2) result.supplierRut = rutMatches[1][1]
+  }
 
   // ─── Proveedor (nuestra empresa) ──────────────────────────────────────────
   result.supplierName = extract(text, [
-    /SEÑOR\s*\(ES\)\s*:\s*([^\n]+)/i,
+    /SE[ÑN]OR\s*\(ES\)\s*:\s*([^\n]+)/i,
     /Se[ñn]or\s*\(es\)\s*:\s*([^\n]+)/i,
   ])
 
@@ -222,70 +251,93 @@ export function parsePDFText(rawText: string): ParsedOC {
 /**
  * Extrae productos de la tabla de Mercado Público.
  *
- * Formato de cada fila en el texto extraído del PDF:
- *   [ID licitación ej: "2239-9-LR24"]
- *   [NOMBRE PRODUCTO (puede ser varias líneas en mayúsculas)]
- *   [CANTIDAD]  [código entre paréntesis (XXXXXXX) seguido de descripción]
- *   [descripción proveedor con dirección y ;]
- *   [PRECIO UNITARIO]
- *   [0,00]  <- descuento
- *   [0,00]  <- cargos
- *   [VALOR TOTAL]
+ * Estrategia: localizar cada código (XXXXXXX) en el texto y reconstruir el producto
+ * a partir del contexto circundante, tolerando múltiples líneas entre los campos.
  *
- * El código del producto siempre aparece entre paréntesis: (4220418)
- * El precio tiene formato chileno: 2.446,00 o 2446
- * El total también: 48.920 o 48920
+ * Estructura en el texto extraído:
+ *   [ID licitación]
+ *   [NOMBRE PRODUCTO en mayúsculas - columna "Producto"]
+ *   [CANTIDAD] (CODIGO) descripción esp.comprador;
+ *   descripción esp.proveedor; dirección...
+ *   PRECIO_UNITARIO 0,00 0,00 VALOR_TOTAL
  */
 function parseProducts(text: string): ParsedProduct[] {
   const products: ParsedProduct[] = []
   const seen = new Set<string>()
 
-  // Estrategia principal: buscar "(CODIGO) descripción ... precio 0,00 0,00 total"
-  // Esto cubre el caso donde pdf-parse junta bien las líneas
-  const pattern1 = /(\d{1,4})\s+\((\d{6,8})\)\s+([^\n(]{5,})(?:;[^\n]*)?\s+([\d.]{3,}[,\d]*)\s+0[,\.]00\s+0[,\.]00\s+([\d.]{3,}[,\d]*)/gm
+  const codePattern = /\((\d{6,8})\)/g
   let m: RegExpExecArray | null
-  while ((m = pattern1.exec(text)) !== null) {
-    const qty = parseFloat(m[1])
-    const code = m[2]
-    const name = cleanProductName(m[3])
-    const unitPrice = parseChileanNumber(m[4])
-    const total = parseChileanNumber(m[5])
+
+  while ((m = codePattern.exec(text)) !== null) {
+    const code = m[1]
+    const codeStart = m.index
+    const codeEnd = codeStart + m[0].length
+
+    // === Nombre del producto ===
+    // El nombre en "Esp. Comprador" viene inmediatamente después del código en la misma línea.
+    // También intentamos tomar el nombre de la columna "Producto" (antes de la cantidad).
+    const afterCodeLine = text.slice(codeEnd, codeEnd + 200)
+    const nameFromCode = afterCodeLine.match(/^([^\n;(]{3,})/)
+    const nameEspComprador = nameFromCode ? cleanProductName(nameFromCode[1]) : ''
+    if (nameEspComprador.length < 3) continue
+
+    // === Cantidad ===
+    // Número que precede directamente al (CODIGO) en la misma línea o línea anterior
+    const beforeCode = text.slice(Math.max(0, codeStart - 150), codeStart)
+    const qtyM = beforeCode.match(/(\d{1,4})\s*$/)
+    if (!qtyM) continue
+    const qty = parseInt(qtyM[1])
+    if (qty <= 0 || qty >= 10000) continue
+
+    // === Nombre de la columna "Producto" (mayúsculas, antes de la cantidad) ===
+    const beforeQty = beforeCode.slice(0, beforeCode.length - qtyM[0].length)
+    const productColM = beforeQty.match(/([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,\-\.]{4,})\s*$/)
+    const productName = productColM
+      ? cleanProductName(productColM[1])
+      : nameEspComprador
+
+    // === Precio ===
+    // Buscar dentro de los próximos 700 chars: "precio 0,00 0,00 total"
+    // El esp.proveedor (con dirección) puede ocupar 1-3 líneas intermedias.
+    const afterCode = text.slice(codeEnd, codeEnd + 700)
+    const priceM = afterCode.match(/([\d.]+,\d{2})\s+0[,.]00\s+0[,.]00\s+([\d.]+[,.]?\d*)/)
+      || afterCode.match(/([\d.]{3,})\s+0[,.]00\s+0[,.]00\s+([\d.]{3,})/)
+
+    if (!priceM) continue
+
+    const unitPrice = parseChileanNumber(priceM[1])
+    const total = parseChileanNumber(priceM[2])
+    if (unitPrice <= 0) continue
+
     const key = `${code}-${qty}`
-    if (qty > 0 && qty < 100000 && name.length > 3 && unitPrice > 0 && !seen.has(key)) {
+    if (!seen.has(key)) {
       seen.add(key)
-      products.push({ productCode: code, productName: name, quantity: qty, unitPrice, totalPrice: total || qty * unitPrice, unit: 'UN', discount: 0 })
+      products.push({
+        productCode: code,
+        productName: productName.length > 3 ? productName : nameEspComprador,
+        quantity: qty,
+        unitPrice,
+        totalPrice: total || qty * unitPrice,
+        unit: 'UN',
+        discount: 0,
+      })
     }
   }
 
-  if (products.length > 0) return products
-
-  // Estrategia 2: buscar códigos entre paréntesis y reconstruir
-  // En PDFs donde el texto no se extrae en orden lineal
-  const codeMatches = [...text.matchAll(/\((\d{6,8})\)\s+([A-ZÁÉÍÓÚÑ][^\n;(]{5,})/g)]
-  for (const cm of codeMatches) {
-    const code = cm[1]
-    const nameRaw = cleanProductName(cm[2])
-    if (nameRaw.length < 4) continue
-
-    // Buscar precio y cantidad en el contexto alrededor
-    const idx = cm.index ?? 0
-    const context = text.slice(Math.max(0, idx - 300), idx + 300)
-
-    // Cantidad: número solo en línea previa
-    const qtyM = context.slice(0, context.indexOf(cm[0])).match(/\b(\d{1,4})\s*$/)
-    const qty = qtyM ? parseInt(qtyM[1]) : 1
-
-    // Precio: primer número con formato chileno después del nombre
-    const after = context.slice(context.indexOf(cm[0]) + cm[0].length)
-    const priceM = after.match(/([\d.]{3,}[,\d]*)\s+0[,\.]00\s+0[,\.]00\s+([\d.]{3,}[,\d]*)/)
-
-    if (priceM) {
-      const unitPrice = parseChileanNumber(priceM[1])
-      const total = parseChileanNumber(priceM[2])
+  // Fallback: si el patrón anterior no encontró nada, intentar patrón lineal compacto
+  if (products.length === 0) {
+    const pattern1 = /(\d{1,4})\s+\((\d{6,8})\)\s+([^\n(]{5,})(?:;[^\n]*)?\s+([\d.]{3,}[,\d]*)\s+0[,.]00\s+0[,.]00\s+([\d.]{3,}[,\d]*)/gm
+    let fm: RegExpExecArray | null
+    while ((fm = pattern1.exec(text)) !== null) {
+      const qty = parseFloat(fm[1])
+      const code = fm[2]
+      const name = cleanProductName(fm[3])
+      const unitPrice = parseChileanNumber(fm[4])
+      const total = parseChileanNumber(fm[5])
       const key = `${code}-${qty}`
-      if (!seen.has(key) && unitPrice > 0) {
+      if (qty > 0 && qty < 100000 && name.length > 3 && unitPrice > 0 && !seen.has(key)) {
         seen.add(key)
-        products.push({ productCode: code, productName: nameRaw, quantity: qty, unitPrice, totalPrice: total || qty * unitPrice, unit: 'UN' })
+        products.push({ productCode: code, productName: name, quantity: qty, unitPrice, totalPrice: total || qty * unitPrice, unit: 'UN', discount: 0 })
       }
     }
   }

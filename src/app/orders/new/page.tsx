@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatCurrency } from '@/lib/utils'
 import { Upload, Plus, Trash2, AlertCircle, CheckCircle, Loader2, Calculator, SplitSquareHorizontal } from 'lucide-react'
@@ -25,9 +25,12 @@ export default function NewOrderPage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [tab, setTab] = useState<'manual' | 'pdf'>('manual')
+  const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfResult, setPdfResult] = useState<any>(null)
+  const [pdfRawText, setPdfRawText] = useState<string>('')
+  const [showDebug, setShowDebug] = useState(false)
   const [error, setError] = useState('')
 
   const [form, setForm] = useState({
@@ -49,6 +52,9 @@ export default function NewOrderPage() {
   // Guarda los items originales (con IVA incluido) para poder revertir
   const [itemsOriginal, setItemsOriginal] = useState<ProductRow[] | null>(null)
   const ivaDesglosado = itemsOriginal !== null
+
+  // Ref para acceder a processPDFFile desde el listener nativo de window
+  const processPDFRef = useRef<((file: File) => Promise<void>) | null>(null)
 
   const setField = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }))
 
@@ -108,9 +114,9 @@ export default function NewOrderPage() {
     return ''
   }
 
-  const handlePDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+  const processPDFFile = async (file: File) => {
+    const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    if (!file || !isPDF) { setError('El archivo debe ser un PDF (.pdf)'); return }
     setPdfLoading(true)
     setError('')
     const fd = new FormData()
@@ -122,6 +128,7 @@ export default function NewOrderPage() {
       const p = data.parsed
 
       setPdfResult(p)
+      setPdfRawText(data.rawText || '')
       setItemsOriginal(null) // resetear toggle al cargar nuevo PDF
 
       // Poblar productos primero
@@ -165,9 +172,53 @@ export default function NewOrderPage() {
       setError('Error procesando PDF')
     } finally {
       setPdfLoading(false)
-      // reset input para permitir subir el mismo archivo de nuevo
       if (fileRef.current) fileRef.current.value = ''
     }
+  }
+
+  // Mantener el ref actualizado para usarlo en el listener nativo
+  processPDFRef.current = processPDFFile
+
+  // Listeners nativos en window: evita que el navegador abra el PDF en nueva pestaña
+  // Los eventos sintéticos de React no siempre previenen el default del navegador
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => e.preventDefault()
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      const file = e.dataTransfer?.files?.[0]
+      if (file) {
+        setTab('pdf')
+        processPDFRef.current?.(file)
+      }
+    }
+    window.addEventListener('dragover', onDragOver)
+    window.addEventListener('drop', onDrop)
+    return () => {
+      window.removeEventListener('dragover', onDragOver)
+      window.removeEventListener('drop', onDrop)
+    }
+  }, [])
+
+  const handlePDF = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) processPDFFile(file)
+  }
+
+  // Los handlers del div solo manejan el estado visual (isDragging)
+  // El procesamiento real lo hace el listener nativo de window arriba
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -210,7 +261,11 @@ export default function NewOrderPage() {
       {tab === 'pdf' && (
         <div
           onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed border-blue-300 rounded-xl p-12 text-center cursor-pointer hover:bg-blue-50 transition-colors"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragOver}
+          onDragLeave={handleDragLeave}
+          className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-500 bg-blue-100' : 'border-blue-300 hover:bg-blue-50'}`}
         >
           <input ref={fileRef} type="file" accept=".pdf" onChange={handlePDF} className="hidden" />
           {pdfLoading ? (
@@ -243,6 +298,48 @@ export default function NewOrderPage() {
         <div className="flex gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
           <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
           <p className="text-sm text-green-800 font-medium">PDF leído correctamente — {items.length} producto(s) cargados. Revisa y guarda.</p>
+        </div>
+      )}
+
+      {/* Panel de debug PDF */}
+      {pdfResult && (
+        <div className="border rounded-lg overflow-hidden text-xs">
+          <button
+            type="button"
+            onClick={() => setShowDebug(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium"
+          >
+            <span>🔍 Debug extracción PDF</span>
+            <span>{showDebug ? '▲ Ocultar' : '▼ Ver'}</span>
+          </button>
+          {showDebug && (
+            <div className="grid grid-cols-2 divide-x bg-white">
+              {/* Campos parseados */}
+              <div className="p-4 space-y-1 overflow-auto max-h-80">
+                <p className="font-semibold text-gray-700 mb-2">Campos extraídos</p>
+                {(['ocNumber','ocDate','buyerName','buyerRut','supplierName','supplierRut',
+                   'deliveryAddress','billingAddress','paymentTerms','totalNet','iva','totalFinal',
+                   'expectedDeliveryDate','observations'] as const).map(k => (
+                  <div key={k} className="flex gap-2">
+                    <span className="text-gray-400 w-36 shrink-0">{k}:</span>
+                    <span className="text-gray-800 break-all">{String((pdfResult as any)[k] ?? '—')}</span>
+                  </div>
+                ))}
+                <div className="mt-2 font-semibold text-gray-700">Productos ({pdfResult.products?.length ?? 0})</div>
+                {pdfResult.products?.map((p: any, i: number) => (
+                  <div key={i} className="pl-2 border-l-2 border-blue-200 text-gray-600">
+                    [{i+1}] ({p.productCode}) {p.productName} — qty:{p.quantity} price:{p.unitPrice}
+                  </div>
+                ))}
+                <div className="mt-2 text-orange-600">Validar: {pdfResult.fieldsRequiringValidation?.join(', ') || 'ninguno'}</div>
+              </div>
+              {/* Texto crudo */}
+              <div className="p-4 overflow-auto max-h-80">
+                <p className="font-semibold text-gray-700 mb-2">Texto crudo del PDF</p>
+                <pre className="whitespace-pre-wrap text-gray-500 leading-relaxed">{pdfRawText}</pre>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

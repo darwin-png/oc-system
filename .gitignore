@@ -14,7 +14,11 @@ prisma/dev.db-journal
 .env.local
 .env.*.local
 
+# Netlify
+.netlify/
+
 # Misc
 .DS_Store
 *.pem
 npm-debug.log*
+tsconfig.tsbuildinfo
