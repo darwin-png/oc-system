@@ -116,7 +116,7 @@ export function parsePDFText(rawText: string): ParsedOC {
   if (result.buyerName) {
     result.buyerName = result.buyerName
       .replace(/Unidad de Compra.*/i, '')
-      .replace(/\n.*/s, '')
+      .split('\n')[0]
       .trim()
   }
 
