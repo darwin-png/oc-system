@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id         String   @id @default(cuid())
+  name       String
+  email      String   @unique
+  department String
+  createdAt  DateTime @default(now())
+  orders     Order[]
+  logs       ActivityLog[]
+}
+
+model Order {
+  id                   String      @id @default(cuid())
+  ocNumber             String      @unique
+  ocDate               DateTime
+  buyerName            String
+  buyerRut             String
+  deliveryAddress      String
+  billingAddress       String      @default("")
+  totalNet             Float
+  iva                  Float
+  totalFinal           Float
+  status               String      @default("INGRESADA")
+  observations         String?
+  deliveryRestrictions String?
+  expectedDeliveryDate DateTime?
+  requiresValidation   Boolean     @default(false)
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  createdById          String?
+  createdBy            User?       @relation(fields: [createdById], references: [id])
+  items                OrderItem[]
+  deliveries           Delivery[]
+  logs                 ActivityLog[]
+}
+
+model OrderItem {
+  id           String   @id @default(cuid())
+  orderId      String
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productCode  String?
+  productName  String
+  quantity     Float
+  unitPrice    Float
+  totalPrice   Float
+  unit         String?
+  deliveredQty Float    @default(0)
+  pendingQty   Float
+  @@index([orderId])
+}
+
+model Delivery {
+  id             String         @id @default(cuid())
+  orderId        String
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  deliveryNumber Int
+  scheduledDate  DateTime?
+  deliveredDate  DateTime?
+  status         String         @default("PENDIENTE")
+  transportist   String?
+  route          String?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  items          DeliveryItem[]
+  logs           ActivityLog[]
+  @@index([orderId])
+}
+
+model DeliveryItem {
+  id          String   @id @default(cuid())
+  deliveryId  String
+  delivery    Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  orderItemId String
+  quantity    Float
+  delivered   Float    @default(0)
+  missing     Float    @default(0)
+}
+
+model ActivityLog {
+  id         String    @id @default(cuid())
+  orderId    String?
+  order      Order?    @relation(fields: [orderId], references: [id])
+  deliveryId String?
+  delivery   Delivery? @relation(fields: [deliveryId], references: [id])
+  userId     String?
+  user       User?     @relation(fields: [userId], references: [id])
+  department String?
+  action     String
+  comment    String?
+  createdAt  DateTime  @default(now())
+  @@index([orderId])
+  @@index([createdAt])
+}
