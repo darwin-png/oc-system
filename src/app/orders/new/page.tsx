@@ -508,7 +508,7 @@ export default function NewOrderPage() {
                 <tr className="border-b bg-gray-50">
                   <th className="text-left px-2 py-2 text-xs font-medium text-gray-500 w-28">Código</th>
                   <th className="text-left px-2 py-2 text-xs font-medium text-gray-500">Producto *</th>
-                  <th className="text-left px-2 py-2 text-xs font-medium text-gray-500 w-16">Unidad</th>
+                  <th className="text-left px-2 py-2 text-xs font-medium text-gray-500 w-24">Unidad</th>
                   <th className="text-right px-2 py-2 text-xs font-medium text-gray-500 w-20">Cant. *</th>
                   <th className="text-right px-2 py-2 text-xs font-medium text-gray-500 w-32">Precio Unit. *</th>
                   <th className="text-right px-2 py-2 text-xs font-medium text-gray-500 w-32">Total línea</th>

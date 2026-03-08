@@ -88,14 +88,18 @@ function normalizeDate(str: string): string {
 
 function cleanProductName(name: string): string {
   return name
-    .replace(/\n/g, ' ')                                      // colapsar saltos de línea
-    .replace(/^\(\d+\)\s*/, '')                               // quitar código al inicio
-    .replace(/;[\s\S]*$/, '')                                 // quitar desde primer punto y coma
-    .replace(/\s*REGI[OÓ]N\s+RM\s*$/i, '')                  // quitar "REGIÓN RM"
-    .replace(/\s*REGI[OÓ]N\s+DE\s+[A-ZÁÉÍÓÚÑ\s,]{2,}$/i, '') // quitar "REGIÓN DE ..."
-    .replace(/\s*REGI[OÓ]N\s+[IVX]+\s*$/i, '')              // quitar "REGIÓN IV"
-    .replace(/\s*UNIDAD\s+[IVX]+\s+REGI[OÓ]N\s*$/i, '')     // quitar "UNIDAD IV REGIÓN"
-    .replace(/\s{2,}/g, ' ')                                   // colapsar espacios extra
+    .replace(/\n/g, ' ')                                                  // colapsar saltos de línea
+    .replace(/^\(\d+\)\s*/, '')                                           // quitar código al inicio
+    .replace(/;[\s\S]*$/, '')                                             // quitar desde primer punto y coma
+    .replace(/\s*\d+\s+UNIDADES?\s+[IVX]+\s+REGI[OÓ]N\s*$/i, '')       // "37 UNIDADES V REGIÓN"
+    .replace(/\s*\d+\s+CAJAS?\s+[IVX]+\s+REGI[OÓ]N\s*$/i, '')          // "37 CAJAS V REGIÓN"
+    .replace(/\s*UNIDADES?\s+[IVX]+\s+REGI[OÓ]N\s*$/i, '')              // "UNIDADES V REGIÓN"
+    .replace(/\s*UNIDAD\s+[IVX]+\s+REGI[OÓ]N\s*$/i, '')                 // "UNIDAD V REGIÓN"
+    .replace(/\s*[IVX]+\s+REGI[OÓ]N\s*$/i, '')                          // "V REGIÓN" solo
+    .replace(/\s*REGI[OÓ]N\s+RM\s*$/i, '')                              // "REGIÓN RM"
+    .replace(/\s*REGI[OÓ]N\s+DE\s+[A-ZÁÉÍÓÚÑ\s,]{2,}$/i, '')           // "REGIÓN DE ..."
+    .replace(/\s*REGI[OÓ]N\s+[IVX]+\s*$/i, '')                          // "REGIÓN IV"
+    .replace(/\s{2,}/g, ' ')                                              // colapsar espacios extra
     .trim()
 }
 
@@ -368,20 +372,34 @@ function strategyA_codes(text: string): ParsedProduct[] {
     // ── Nombre columna "Producto" (mayúsculas antes de la cantidad) ────────
     const beforeQty = beforeCode.slice(0, beforeCode.length - qtyM[0].length)
     const productColM = beforeQty.match(/([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,\-\.\/]{4,})\s*$/)
-    const productName = productColM ? cleanProductName(productColM[1]) : nameEspComprador
+    // Rechazar si el texto capturado es solo unidad+región (ej. "UNIDADES V REGIÓN")
+    const isUnitRegion = /^(?:\d+\s+)?(?:UNIDADES?|CAJAS?|BOLSAS?|ROLLOS?)\s*(?:[IVX]+)?\s*(?:REGI[OÓ]N)?/i
+      .test((productColM?.[1] || '').trim())
+    const productName = (productColM && !isUnitRegion)
+      ? cleanProductName(productColM[1])
+      : nameEspComprador
 
-    // ── Precio ─────────────────────────────────────────────────────────────
-    // Buscar en 1200 chars (nombre puede ser largo en PDFs multilínea)
-    const afterCode = text.slice(codeEnd, codeEnd + 1200)
-    const priceM =
-      afterCode.match(/([\d.]+,\d{2})\s+[\d.,]+\s+[\d.,]+\s+([\d.]+,\d{2})/) ||  // precio dcto cargo total
-      afterCode.match(/([\d.]{3,})\s+[\d.,]+\s+[\d.,]+\s+([\d.]{3,})/) ||          // sin coma decimal
-      afterCode.match(/([\d.]+,\d{2})\s+([\d.]+,\d{2})/)                            // solo precio y total
-
-    if (!priceM) continue
-    const unitPrice = parseChileanNumber(priceM[1])
-    const total = parseChileanNumber(priceM[2])
-    if (unitPrice <= 0 || unitPrice > 1_000_000_000) continue
+    // ── Precio — validación matemática: total ≈ qty × unitPrice (±5%) ─────
+    const afterCode = text.slice(codeEnd, codeEnd + 1500)
+    const numPattern = /(\d{1,3}(?:\.\d{3})*,\d{2})/g
+    const nums: number[] = []
+    let nm: RegExpExecArray | null
+    while ((nm = numPattern.exec(afterCode)) !== null) {
+      const v = parseChileanNumber(nm[1])
+      if (v > 0 && v < 1_000_000_000) nums.push(v)
+    }
+    let unitPrice = 0, total = 0
+    outer: for (let i = 0; i < nums.length; i++) {
+      for (let j = i + 1; j < Math.min(nums.length, i + 6); j++) {
+        const expected = qty * nums[i]
+        if (expected > 0 && Math.abs(nums[j] - expected) / expected < 0.05) {
+          unitPrice = nums[i]
+          total = nums[j]
+          break outer
+        }
+      }
+    }
+    if (unitPrice <= 0) continue  // no se encontró par válido → saltar producto
 
     // ── Descripción limpia (multilínea colapsada, sin región) ──────────────
     const description = rawName.replace(/\n/g, ' ').replace(/\s{2,}/g, ' ').trim()
