@@ -250,6 +250,12 @@ export function parsePDFText(rawText: string): ParsedOC {
   ])
   if (netoStr) result.totalNet = parseChileanNumber(netoStr)
 
+  const discountStr = extract(text, [
+    /\bDcto\.?\b\s*\$?\s*([\d.,]+)/i,
+    /Descuento\s*\$?\s*([\d.,]+)/i,
+  ])
+  if (discountStr) result.discounts = parseChileanNumber(discountStr)
+
   const ivaStr = extract(text, [
     /19%\s*IVA\s*\$?\s*([\d.,]+)/i,
     /\bIVA\b\s*\$?\s*([\d.,]+)/i,
