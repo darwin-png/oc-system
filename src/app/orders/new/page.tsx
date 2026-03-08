@@ -83,12 +83,13 @@ export default function NewOrderPage() {
         buyerName: p.buyerName || '',
         buyerRut: p.buyerRut || '',
         deliveryAddress: p.deliveryAddress || '',
-        billingAddress: p.billingAddress || '',
+        billingAddress: p.billingAddress || p.deliveryAddress || '',
         totalNet: p.totalNet || 0,
         iva: p.iva || 0,
         totalFinal: p.totalFinal || 0,
         expectedDeliveryDate: p.expectedDeliveryDate ? formatDateInput(p.expectedDeliveryDate) : '',
-        observations: p.observations || '',
+        observations: [p.ocName, p.observations].filter(Boolean).join(' | ') || '',
+        deliveryRestrictions: p.deliveryRestrictions || '',
         requiresValidation: (p.fieldsRequiringValidation?.length || 0) > 0,
       }))
       if (p.products?.length > 0) {
