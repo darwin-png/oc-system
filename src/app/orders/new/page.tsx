@@ -46,6 +46,9 @@ export default function NewOrderPage() {
     requiresValidation: false,
   })
   const [items, setItems] = useState<ProductRow[]>([emptyProduct()])
+  // Guarda los items originales (con IVA incluido) para poder revertir
+  const [itemsOriginal, setItemsOriginal] = useState<ProductRow[] | null>(null)
+  const ivaDesglosado = itemsOriginal !== null
 
   const setField = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }))
 
@@ -60,28 +63,33 @@ export default function NewOrderPage() {
     })
   }
 
-  // Recalcula neto + IVA desde la suma de productos (con IVA incluido)
   const calcTotals = () => {
-    const subtotal = items.reduce((s, i) => s + i.totalPrice, 0)
-    const net = Math.round(subtotal)
+    const net = items.reduce((s, i) => s + i.totalPrice, 0)
     const iva = Math.round(net * 0.19)
     setForm(f => ({ ...f, totalNet: net, iva, totalFinal: net + iva }))
   }
 
-  // Botón "Desglosar IVA": asume que los precios unitarios YA incluyen IVA
-  // → separa neto (precio / 1.19) e IVA (19%)
-  const desglosarIVA = () => {
-    // Recalcular items: precio unitario con IVA → precio unitario neto
-    const updatedItems = items.map(item => {
-      const precioNeto = Math.round(item.unitPrice / 1.19)
-      const totalNeto = Math.round(precioNeto * item.quantity)
-      return { ...item, unitPrice: precioNeto, totalPrice: totalNeto }
-    })
-    setItems(updatedItems)
-
-    const totalNeto = updatedItems.reduce((s, i) => s + i.totalPrice, 0)
-    const iva = Math.round(totalNeto * 0.19)
-    setForm(f => ({ ...f, totalNet: totalNeto, iva, totalFinal: totalNeto + iva }))
+  // Toggle: primera vez separa IVA, segunda vez revierte al estado original
+  const toggleDesglosarIVA = () => {
+    if (ivaDesglosado) {
+      // Revertir a precios originales (con IVA incluido)
+      setItems(itemsOriginal!)
+      const totalOriginal = itemsOriginal!.reduce((s, i) => s + i.totalPrice, 0)
+      setForm(f => ({ ...f, totalNet: totalOriginal, iva: 0, totalFinal: totalOriginal }))
+      setItemsOriginal(null)
+    } else {
+      // Guardar estado original y desglosar
+      setItemsOriginal(items.map(i => ({ ...i })))
+      const desglosados = items.map(item => {
+        const precioNeto = Math.round(item.unitPrice / 1.19)
+        const totalNeto = Math.round(precioNeto * item.quantity)
+        return { ...item, unitPrice: precioNeto, totalPrice: totalNeto }
+      })
+      setItems(desglosados)
+      const totalNeto = desglosados.reduce((s, i) => s + i.totalPrice, 0)
+      const iva = Math.round(totalNeto * 0.19)
+      setForm(f => ({ ...f, totalNet: totalNeto, iva, totalFinal: totalNeto + iva }))
+    }
   }
 
   // Totales desde suma de productos (precios ya son netos)
@@ -114,6 +122,7 @@ export default function NewOrderPage() {
       const p = data.parsed
 
       setPdfResult(p)
+      setItemsOriginal(null) // resetear toggle al cargar nuevo PDF
 
       // Poblar productos primero
       const parsedItems: ProductRow[] = p.products?.length > 0
@@ -364,11 +373,15 @@ export default function NewOrderPage() {
                 <Calculator className="h-3.5 w-3.5" />
                 Recalcular totales
               </button>
-              <button type="button" onClick={desglosarIVA}
-                title="Asume que los precios unitarios incluyen IVA. Los separa: precio neto = precio / 1.19, IVA = 19% del neto."
-                className="flex items-center gap-1.5 text-xs bg-orange-50 hover:bg-orange-100 text-orange-700 font-medium px-3 py-2 rounded-lg border border-orange-200 transition-colors">
+              <button type="button" onClick={toggleDesglosarIVA}
+                title={ivaDesglosado ? 'Revertir a precios originales con IVA incluido' : 'Separa el IVA de los precios: precio neto = precio / 1.19'}
+                className={`flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border transition-colors ${
+                  ivaDesglosado
+                    ? 'bg-green-50 hover:bg-green-100 text-green-700 border-green-200'
+                    : 'bg-orange-50 hover:bg-orange-100 text-orange-700 border-orange-200'
+                }`}>
                 <SplitSquareHorizontal className="h-3.5 w-3.5" />
-                Desglosar IVA
+                {ivaDesglosado ? 'Revertir IVA' : 'Desglosar IVA'}
               </button>
             </div>
 
