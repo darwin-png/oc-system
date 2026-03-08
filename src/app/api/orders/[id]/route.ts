@@ -33,8 +33,10 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
       data: {
         ...updateData,
         ...(status && { status }),
-        ...(updateData.expectedDeliveryDate && { expectedDeliveryDate: new Date(updateData.expectedDeliveryDate) }),
         ...(updateData.ocDate && { ocDate: new Date(updateData.ocDate) }),
+        ...(updateData.sentDate && { sentDate: new Date(updateData.sentDate) }),
+        ...(updateData.acceptanceDate && { acceptanceDate: new Date(updateData.acceptanceDate) }),
+        ...(updateData.expectedDeliveryDate && { expectedDeliveryDate: new Date(updateData.expectedDeliveryDate) }),
       },
       include: { items: true, deliveries: { include: { items: true } } },
     })

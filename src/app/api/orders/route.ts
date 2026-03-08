@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
       data: {
         ...orderData,
         ocDate: new Date(orderData.ocDate),
+        sentDate: orderData.sentDate ? new Date(orderData.sentDate) : null,
+        acceptanceDate: orderData.acceptanceDate ? new Date(orderData.acceptanceDate) : null,
         expectedDeliveryDate: orderData.expectedDeliveryDate ? new Date(orderData.expectedDeliveryDate) : null,
         items: {
           create: items.map((item: any) => ({

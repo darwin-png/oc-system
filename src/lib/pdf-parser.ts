@@ -14,21 +14,31 @@
 export interface ParsedOC {
   ocNumber?: string
   ocDate?: string
-  buyerName?: string           // Demandante (organismo del Estado)
-  buyerRut?: string            // RUT del organismo comprador
-  supplierName?: string        // Proveedor (nuestra empresa)
-  supplierRut?: string         // RUT del proveedor
-  deliveryAddress?: string     // Direcciones de despacho
-  billingAddress?: string      // Dirección envío factura
-  paymentTerms?: string        // Forma de pago
-  unitArea?: string            // Unidad de compra
-  ocName?: string              // Nombre de la orden de compra
+  sentDate?: string
+  acceptanceDate?: string
+  expectedDeliveryDate?: string
+  buyerName?: string
+  buyerRut?: string
+  buyerInstitution?: string
+  supplierName?: string
+  supplierRut?: string
+  supplierContact?: string
+  supplierPhone?: string
+  supplierEmail?: string
+  deliveryAddress?: string
+  deliveryCity?: string
+  deliveryRegion?: string
+  billingAddress?: string
+  paymentTerms?: string
+  unitArea?: string
+  ocName?: string
+  currency?: string
   totalNet?: number
+  discounts?: number
   iva?: number
   totalFinal?: number
-  expectedDeliveryDate?: string
   observations?: string
-  deliveryRestrictions?: string  // Observaciones del despacho (horarios, restricciones)
+  deliveryRestrictions?: string
   products: ParsedProduct[]
   fieldsRequiringValidation: string[]
 }
@@ -99,17 +109,26 @@ export function parsePDFText(rawText: string): ParsedOC {
     /(\d{6,}-\d{3,}-[A-Z]{2}\d+)/,
   ])
 
-  // ─── Fecha OC ─────────────────────────────────────────────────────────────
+  // ─── Fechas ───────────────────────────────────────────────────────────────
   const rawDate = extract(text, [
-    /Fecha Envio OC[\.\s]*:\s*(\d{2}[-/]\d{2}[-/]\d{4})/i,
     /Fecha\s+OC\s*:\s*(\d{2}[-/]\d{2}[-/]\d{4})/i,
+    /Fecha\s+Emisi[oó]n\s*:\s*(\d{2}[-/]\d{2}[-/]\d{4})/i,
     /(\d{2}[-/]\d{2}[-/]\d{4})/,
   ])
   if (rawDate) result.ocDate = normalizeDate(rawDate)
 
+  const rawSent = extract(text, [
+    /Fecha\s+Envio?\s+OC[\.\s]*:\s*(\d{2}[-/]\d{2}[-/]\d{4})/i,
+    /Fecha\s+Env[íi]o\s*:\s*(\d{2}[-/]\d{2}[-/]\d{4})/i,
+  ])
+  if (rawSent) result.sentDate = normalizeDate(rawSent)
+
+  const rawAcceptance = extract(text, [
+    /Fecha\s+Aceptaci[oó]n\s*:\s*(\d{2}[-/]\d{2}[-/]\d{4})/i,
+  ])
+  if (rawAcceptance) result.acceptanceDate = normalizeDate(rawAcceptance)
+
   // ─── Organismo comprador (Demandante) ─────────────────────────────────────
-  // "Demandante :" aparece en la columna derecha del encabezado.
-  // NO usar SEÑOR(ES) como fallback: ese es el proveedor.
   result.buyerName = extract(text, [
     /Demandante\s*:\s*([^\n\r]{5,})/i,
   ])
@@ -120,6 +139,12 @@ export function parsePDFText(rawText: string): ParsedOC {
       .split('\n')[0]
       .trim()
   }
+
+  // Institución / Unidad de Compra
+  result.buyerInstitution = extract(text, [
+    /Unidad de Compra\s*:\s*([^\n]+)/i,
+    /Organismo\s*:\s*([^\n]+)/i,
+  ])
 
   // ─── RUTs ─────────────────────────────────────────────────────────────────
   // En el PDF de Mercado Público:
@@ -154,11 +179,19 @@ export function parsePDFText(rawText: string): ParsedOC {
     if (!result.supplierRut && rutMatches.length >= 2) result.supplierRut = rutMatches[1][1]
   }
 
-  // ─── Proveedor (nuestra empresa) ──────────────────────────────────────────
+  // ─── Proveedor ────────────────────────────────────────────────────────────
   result.supplierName = extract(text, [
     /SE[ÑN]OR\s*\(ES\)\s*:\s*([^\n]+)/i,
     /Se[ñn]or\s*\(es\)\s*:\s*([^\n]+)/i,
   ])
+
+  // Contacto, teléfono y email del proveedor
+  if (senorIdx > -1) {
+    const provCtx = text.slice(senorIdx, senorIdx + 800)
+    result.supplierContact = extract(provCtx, [/Contacto\s*:\s*([^\n]+)/i, /Atenci[oó]n\s*:\s*([^\n]+)/i])
+    result.supplierPhone = extract(provCtx, [/Tel[eé]fono?\s*:\s*([^\n]+)/i, /F[oó]no\s*:\s*([^\n]+)/i])
+    result.supplierEmail = extract(provCtx, [/E?-?mail\s*:\s*([^\n@\s]+@[^\n\s]+)/i, /([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})/i])
+  }
 
   // ─── Nombre de la OC ──────────────────────────────────────────────────────
   result.ocName = extract(text, [
@@ -182,6 +215,21 @@ export function parsePDFText(rawText: string): ParsedOC {
     /Direcci[oó]n\s+de\s+despacho\s*:\s*([^\n]+)/i,
     /Lugar\s+de\s+entrega\s*:\s*([^\n]+)/i,
   ])
+
+  // Ciudad y Región desde la dirección o campos separados
+  result.deliveryCity = extract(text, [
+    /Ciudad\s*:\s*([^\n,]+)/i,
+    /Comuna\s*:\s*([^\n,]+)/i,
+  ])
+  result.deliveryRegion = extract(text, [
+    /Regi[oó]n\s*:\s*([^\n]+)/i,
+    /(Regi[oó]n\s+(?:Metropolitana|de\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s]+))/i,
+  ])
+  // Intentar extraer ciudad/región desde la dirección de despacho
+  if (!result.deliveryCity && result.deliveryAddress) {
+    const addrMatch = result.deliveryAddress.match(/,\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñA-Z\s]+?)(?:\s*,|$)/)
+    if (addrMatch) result.deliveryCity = addrMatch[1].trim()
+  }
 
   // ─── Dirección factura ────────────────────────────────────────────────────
   result.billingAddress = extract(text, [

@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [deploy]
-startCommand = "node node_modules/.bin/next start -p $PORT"
+startCommand = "node node_modules/.bin/next start -p $PORT -H 0.0.0.0"
 healthcheckPath = "/"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"

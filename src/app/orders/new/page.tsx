@@ -21,6 +21,25 @@ const emptyProduct = (): ProductRow => ({
 const INPUT = "w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
 const LABEL = "block text-xs font-medium text-gray-600 mb-1"
 
+const REGIONES_CHILE = [
+  'Región de Arica y Parinacota',
+  'Región de Tarapacá',
+  'Región de Antofagasta',
+  'Región de Atacama',
+  'Región de Coquimbo',
+  'Región de Valparaíso',
+  'Región Metropolitana de Santiago',
+  "Región del Libertador Gral. Bernardo O'Higgins",
+  'Región del Maule',
+  'Región de Ñuble',
+  'Región del Biobío',
+  'Región de La Araucanía',
+  'Región de Los Ríos',
+  'Región de Los Lagos',
+  'Región de Aysén del Gral. Carlos Ibáñez del Campo',
+  'Región de Magallanes y de la Antártica Chilena',
+]
+
 export default function NewOrderPage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
@@ -34,26 +53,44 @@ export default function NewOrderPage() {
   const [error, setError] = useState('')
 
   const [form, setForm] = useState({
+    // Orden
     ocNumber: '',
+    status: 'INGRESADA',
     ocDate: '',
+    sentDate: '',
+    acceptanceDate: '',
+    expectedDeliveryDate: '',
+    currency: 'CLP',
+    // Comprador
     buyerName: '',
     buyerRut: '',
+    buyerInstitution: '',
+    // Dirección
     deliveryAddress: '',
+    deliveryCity: '',
+    deliveryRegion: '',
     billingAddress: '',
+    // Proveedor
+    supplierName: '',
+    supplierRut: '',
+    supplierContact: '',
+    supplierPhone: '',
+    supplierEmail: '',
+    // Totales
     totalNet: 0,
+    discounts: 0,
     iva: 0,
     totalFinal: 0,
-    expectedDeliveryDate: '',
+    // Otros
     observations: '',
     deliveryRestrictions: '',
     requiresValidation: false,
   })
+
   const [items, setItems] = useState<ProductRow[]>([emptyProduct()])
-  // Guarda los items originales (con IVA incluido) para poder revertir
   const [itemsOriginal, setItemsOriginal] = useState<ProductRow[] | null>(null)
   const ivaDesglosado = itemsOriginal !== null
 
-  // Ref para acceder a processPDFFile desde el listener nativo de window
   const processPDFRef = useRef<((file: File) => Promise<void>) | null>(null)
 
   const setField = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }))
@@ -69,22 +106,19 @@ export default function NewOrderPage() {
     })
   }
 
-  const calcTotals = () => {
+  const recalcFromItems = () => {
     const net = items.reduce((s, i) => s + i.totalPrice, 0)
     const iva = Math.round(net * 0.19)
     setForm(f => ({ ...f, totalNet: net, iva, totalFinal: net + iva }))
   }
 
-  // Toggle: primera vez separa IVA, segunda vez revierte al estado original
   const toggleDesglosarIVA = () => {
     if (ivaDesglosado) {
-      // Revertir a precios originales (con IVA incluido)
       setItems(itemsOriginal!)
       const totalOriginal = itemsOriginal!.reduce((s, i) => s + i.totalPrice, 0)
       setForm(f => ({ ...f, totalNet: totalOriginal, iva: 0, totalFinal: totalOriginal }))
       setItemsOriginal(null)
     } else {
-      // Guardar estado original y desglosar
       setItemsOriginal(items.map(i => ({ ...i })))
       const desglosados = items.map(item => {
         const precioNeto = Math.round(item.unitPrice / 1.19)
@@ -98,16 +132,8 @@ export default function NewOrderPage() {
     }
   }
 
-  // Totales desde suma de productos (precios ya son netos)
-  const recalcFromItems = () => {
-    const net = items.reduce((s, i) => s + i.totalPrice, 0)
-    const iva = Math.round(net * 0.19)
-    setForm(f => ({ ...f, totalNet: net, iva, totalFinal: net + iva }))
-  }
-
   function formatDateInput(dateStr: string): string {
     if (!dateStr) return ''
-    // Si ya viene en formato YYYY-MM-DD (del parser)
     if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr
     const parts = dateStr.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/)
     if (parts) return `${parts[3]}-${parts[2].padStart(2,'0')}-${parts[1].padStart(2,'0')}`
@@ -129,9 +155,8 @@ export default function NewOrderPage() {
 
       setPdfResult(p)
       setPdfRawText(data.rawText || '')
-      setItemsOriginal(null) // resetear toggle al cargar nuevo PDF
+      setItemsOriginal(null)
 
-      // Poblar productos primero
       const parsedItems: ProductRow[] = p.products?.length > 0
         ? p.products.map((prod: any) => ({
             productCode: prod.productCode || '',
@@ -144,7 +169,6 @@ export default function NewOrderPage() {
         : [emptyProduct()]
       setItems(parsedItems)
 
-      // Calcular neto desde suma de productos si no viene del PDF
       const sumaProductos = parsedItems.reduce((s, i) => s + i.totalPrice, 0)
       const totalNet = p.totalNet || sumaProductos
       const totalFinal = p.totalFinal || (totalNet + Math.round(totalNet * 0.19))
@@ -154,14 +178,23 @@ export default function NewOrderPage() {
         ...f,
         ocNumber: p.ocNumber || '',
         ocDate: formatDateInput(p.ocDate || ''),
+        sentDate: formatDateInput(p.sentDate || ''),
+        expectedDeliveryDate: formatDateInput(p.expectedDeliveryDate || ''),
         buyerName: p.buyerName || '',
         buyerRut: p.buyerRut || '',
+        buyerInstitution: p.buyerInstitution || '',
         deliveryAddress: p.deliveryAddress || '',
+        deliveryCity: p.deliveryCity || '',
+        deliveryRegion: p.deliveryRegion || '',
         billingAddress: p.billingAddress || p.deliveryAddress || '',
+        supplierName: p.supplierName || '',
+        supplierRut: p.supplierRut || '',
+        supplierContact: p.supplierContact || '',
+        supplierPhone: p.supplierPhone || '',
+        supplierEmail: p.supplierEmail || '',
         totalNet,
         iva,
         totalFinal,
-        expectedDeliveryDate: formatDateInput(p.expectedDeliveryDate || ''),
         observations: [p.ocName, p.observations].filter(Boolean).join(' | ') || '',
         deliveryRestrictions: p.deliveryRestrictions || '',
         requiresValidation: (p.fieldsRequiringValidation?.length || 0) > 0,
@@ -176,11 +209,8 @@ export default function NewOrderPage() {
     }
   }
 
-  // Mantener el ref actualizado para usarlo en el listener nativo
   processPDFRef.current = processPDFFile
 
-  // Listeners nativos en window: evita que el navegador abra el PDF en nueva pestaña
-  // Los eventos sintéticos de React no siempre previenen el default del navegador
   useEffect(() => {
     const onDragOver = (e: DragEvent) => e.preventDefault()
     const onDrop = (e: DragEvent) => {
@@ -202,23 +232,6 @@ export default function NewOrderPage() {
   const handlePDF = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) processPDFFile(file)
-  }
-
-  // Los handlers del div solo manejan el estado visual (isDragging)
-  // El procesamiento real lo hace el listener nativo de window arriba
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -261,10 +274,10 @@ export default function NewOrderPage() {
       {tab === 'pdf' && (
         <div
           onClick={() => fileRef.current?.click()}
-          onDrop={handleDrop}
-          onDragOver={handleDragOver}
-          onDragEnter={handleDragOver}
-          onDragLeave={handleDragLeave}
+          onDrop={e => { e.preventDefault(); setIsDragging(false) }}
+          onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+          onDragEnter={e => { e.preventDefault(); setIsDragging(true) }}
+          onDragLeave={e => { e.preventDefault(); setIsDragging(false) }}
           className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-500 bg-blue-100' : 'border-blue-300 hover:bg-blue-50'}`}
         >
           <input ref={fileRef} type="file" accept=".pdf" onChange={handlePDF} className="hidden" />
@@ -272,13 +285,12 @@ export default function NewOrderPage() {
             <div className="flex flex-col items-center gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
               <p className="text-sm text-blue-600 font-medium">Leyendo OC...</p>
-              <p className="text-xs text-gray-400">Extrayendo campos, productos y precios</p>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3">
               <Upload className="h-10 w-10 text-blue-400" />
               <p className="text-sm font-medium text-gray-700">Haz clic o arrastra el PDF de la OC aquí</p>
-              <p className="text-xs text-gray-400">Extrae automáticamente: organismo, RUT, dirección, productos, precios y totales</p>
+              <p className="text-xs text-gray-400">Extrae automáticamente todos los datos de la orden</p>
             </div>
           )}
         </div>
@@ -297,32 +309,26 @@ export default function NewOrderPage() {
       {pdfResult && pdfResult.fieldsRequiringValidation?.length === 0 && (
         <div className="flex gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
           <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
-          <p className="text-sm text-green-800 font-medium">PDF leído correctamente — {items.length} producto(s) cargados. Revisa y guarda.</p>
+          <p className="text-sm text-green-800 font-medium">PDF leído correctamente — {items.length} producto(s) cargados.</p>
         </div>
       )}
 
-      {/* Panel de debug PDF */}
+      {/* Debug PDF */}
       {pdfResult && (
         <div className="border rounded-lg overflow-hidden text-xs">
-          <button
-            type="button"
-            onClick={() => setShowDebug(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium"
-          >
+          <button type="button" onClick={() => setShowDebug(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">
             <span>🔍 Debug extracción PDF</span>
             <span>{showDebug ? '▲ Ocultar' : '▼ Ver'}</span>
           </button>
           {showDebug && (
             <div className="grid grid-cols-2 divide-x bg-white">
-              {/* Campos parseados */}
               <div className="p-4 space-y-1 overflow-auto max-h-80">
                 <p className="font-semibold text-gray-700 mb-2">Campos extraídos</p>
-                {(['ocNumber','ocDate','buyerName','buyerRut','supplierName','supplierRut',
-                   'deliveryAddress','billingAddress','paymentTerms','totalNet','iva','totalFinal',
-                   'expectedDeliveryDate','observations'] as const).map(k => (
+                {Object.entries(pdfResult).filter(([k]) => k !== 'products' && k !== 'fieldsRequiringValidation').map(([k, v]) => (
                   <div key={k} className="flex gap-2">
                     <span className="text-gray-400 w-36 shrink-0">{k}:</span>
-                    <span className="text-gray-800 break-all">{String((pdfResult as any)[k] ?? '—')}</span>
+                    <span className="text-gray-800 break-all">{String(v ?? '—')}</span>
                   </div>
                 ))}
                 <div className="mt-2 font-semibold text-gray-700">Productos ({pdfResult.products?.length ?? 0})</div>
@@ -331,9 +337,7 @@ export default function NewOrderPage() {
                     [{i+1}] ({p.productCode}) {p.productName} — qty:{p.quantity} price:{p.unitPrice}
                   </div>
                 ))}
-                <div className="mt-2 text-orange-600">Validar: {pdfResult.fieldsRequiringValidation?.join(', ') || 'ninguno'}</div>
               </div>
-              {/* Texto crudo */}
               <div className="p-4 overflow-auto max-h-80">
                 <p className="font-semibold text-gray-700 mb-2">Texto crudo del PDF</p>
                 <pre className="whitespace-pre-wrap text-gray-500 leading-relaxed">{pdfRawText}</pre>
@@ -344,51 +348,131 @@ export default function NewOrderPage() {
       )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
-        {/* ── Datos de la orden ── */}
+
+        {/* ── Sección 1: Datos de la Orden ── */}
         <div className="bg-white rounded-xl border p-5 space-y-4">
           <h2 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">Datos de la Orden</h2>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={LABEL}>N° OC *</label>
+              <label className={LABEL}>N° Orden de Compra *</label>
               <input type="text" required value={form.ocNumber} onChange={e => setField('ocNumber', e.target.value)} className={INPUT} placeholder="1422825-761-CM25" />
             </div>
             <div>
-              <label className={LABEL}>Fecha OC *</label>
+              <label className={LABEL}>Estado</label>
+              <select value={form.status} onChange={e => setField('status', e.target.value)} className={INPUT}>
+                <option value="INGRESADA">Ingresada</option>
+                <option value="VALIDADA">Validada</option>
+                <option value="PENDIENTE_CALENDARIZAR">Pendiente Calendarizar</option>
+                <option value="CALENDARIZADA">Calendarizada</option>
+                <option value="EN_PREPARACION">En Preparación</option>
+                <option value="PREPARADA">Preparada</option>
+                <option value="EN_RUTA">En Ruta</option>
+                <option value="ENTREGADA">Entregada</option>
+                <option value="PENDIENTE_STOCK">Pendiente Stock</option>
+                <option value="CERRADA">Cerrada</option>
+              </select>
+            </div>
+            <div>
+              <label className={LABEL}>Fecha Emisión *</label>
               <input type="date" required value={form.ocDate} onChange={e => setField('ocDate', e.target.value)} className={INPUT} />
             </div>
+            <div>
+              <label className={LABEL}>Fecha Envío</label>
+              <input type="date" value={form.sentDate} onChange={e => setField('sentDate', e.target.value)} className={INPUT} />
+            </div>
+            <div>
+              <label className={LABEL}>Fecha Aceptación</label>
+              <input type="date" value={form.acceptanceDate} onChange={e => setField('acceptanceDate', e.target.value)} className={INPUT} />
+            </div>
+            <div>
+              <label className={LABEL}>Fecha Entrega</label>
+              <input type="date" value={form.expectedDeliveryDate} onChange={e => setField('expectedDeliveryDate', e.target.value)} className={INPUT} />
+            </div>
+            <div>
+              <label className={LABEL}>Moneda</label>
+              <select value={form.currency} onChange={e => setField('currency', e.target.value)} className={INPUT}>
+                <option value="CLP">CLP — Peso Chileno</option>
+                <option value="USD">USD — Dólar</option>
+                <option value="EUR">EUR — Euro</option>
+                <option value="UTM">UTM</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Sección 2: Comprador ── */}
+        <div className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">Organismo Comprador</h2>
+          <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <label className={LABEL}>Organismo Comprador *</label>
-              <input type="text" required value={form.buyerName} onChange={e => setField('buyerName', e.target.value)} className={INPUT} placeholder="SERVICIO NACIONAL DE SALUD HOSPITAL CARLOS VAN BUR" />
+              <label className={LABEL}>Nombre Comprador / Unidad de Compra *</label>
+              <input type="text" required value={form.buyerName} onChange={e => setField('buyerName', e.target.value)} className={INPUT} placeholder="Hospital Carlos Van Buren" />
             </div>
             <div>
               <label className={LABEL}>RUT Comprador *</label>
               <input type="text" required value={form.buyerRut} onChange={e => setField('buyerRut', e.target.value)} className={INPUT} placeholder="61.602.054-4" />
             </div>
             <div>
-              <label className={LABEL}>Fecha Entrega Esperada</label>
-              <input type="date" value={form.expectedDeliveryDate} onChange={e => setField('expectedDeliveryDate', e.target.value)} className={INPUT} />
-            </div>
-            <div>
-              <label className={LABEL}>Dirección Despacho *</label>
-              <input type="text" required value={form.deliveryAddress} onChange={e => setField('deliveryAddress', e.target.value)} className={INPUT} placeholder="San Ignacio N°783, Valparaíso" />
-            </div>
-            <div>
-              <label className={LABEL}>Dirección Facturación</label>
-              <input type="text" value={form.billingAddress} onChange={e => setField('billingAddress', e.target.value)} className={INPUT} placeholder="San Ignacio 783, Valparaíso" />
-            </div>
-            <div>
-              <label className={LABEL}>Observaciones</label>
-              <textarea value={form.observations} onChange={e => setField('observations', e.target.value)} rows={3} className={INPUT} />
-            </div>
-            <div>
-              <label className={LABEL}>Restricciones / Horarios Entrega</label>
-              <textarea value={form.deliveryRestrictions} onChange={e => setField('deliveryRestrictions', e.target.value)} rows={3} className={INPUT} placeholder="Lunes a jueves 08:30/16:00 hrs..." />
+              <label className={LABEL}>Institución</label>
+              <input type="text" value={form.buyerInstitution} onChange={e => setField('buyerInstitution', e.target.value)} className={INPUT} placeholder="Servicio Nacional de Salud" />
             </div>
           </div>
         </div>
 
-        {/* ── Productos ── */}
+        {/* ── Sección 3: Dirección de Entrega ── */}
+        <div className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">Dirección de Entrega</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <label className={LABEL}>Dirección *</label>
+              <input type="text" required value={form.deliveryAddress} onChange={e => setField('deliveryAddress', e.target.value)} className={INPUT} placeholder="San Ignacio N°783" />
+            </div>
+            <div>
+              <label className={LABEL}>Ciudad</label>
+              <input type="text" value={form.deliveryCity} onChange={e => setField('deliveryCity', e.target.value)} className={INPUT} placeholder="Valparaíso" />
+            </div>
+            <div>
+              <label className={LABEL}>Región</label>
+              <select value={form.deliveryRegion} onChange={e => setField('deliveryRegion', e.target.value)} className={INPUT}>
+                <option value="">Seleccionar región</option>
+                {REGIONES_CHILE.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+            <div className="col-span-2">
+              <label className={LABEL}>Dirección Facturación</label>
+              <input type="text" value={form.billingAddress} onChange={e => setField('billingAddress', e.target.value)} className={INPUT} placeholder="Misma que despacho" />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Sección 4: Proveedor ── */}
+        <div className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">Proveedor</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={LABEL}>Nombre Proveedor</label>
+              <input type="text" value={form.supplierName} onChange={e => setField('supplierName', e.target.value)} className={INPUT} placeholder="Comercial Emergenza SPA" />
+            </div>
+            <div>
+              <label className={LABEL}>RUT Proveedor</label>
+              <input type="text" value={form.supplierRut} onChange={e => setField('supplierRut', e.target.value)} className={INPUT} placeholder="77.123.456-7" />
+            </div>
+            <div>
+              <label className={LABEL}>Contacto</label>
+              <input type="text" value={form.supplierContact} onChange={e => setField('supplierContact', e.target.value)} className={INPUT} placeholder="Nombre del contacto" />
+            </div>
+            <div>
+              <label className={LABEL}>Teléfono</label>
+              <input type="text" value={form.supplierPhone} onChange={e => setField('supplierPhone', e.target.value)} className={INPUT} placeholder="+56 9 1234 5678" />
+            </div>
+            <div className="col-span-2">
+              <label className={LABEL}>Email</label>
+              <input type="email" value={form.supplierEmail} onChange={e => setField('supplierEmail', e.target.value)} className={INPUT} placeholder="contacto@emergenza.cl" />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Sección 5: Productos ── */}
         <div className="bg-white rounded-xl border p-5 space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">
@@ -460,18 +544,14 @@ export default function NewOrderPage() {
             </table>
           </div>
 
-          {/* ── Totales ── */}
+          {/* Totales */}
           <div className="flex justify-between items-end pt-2 border-t">
-
-            {/* Botones de cálculo */}
             <div className="flex gap-2">
               <button type="button" onClick={recalcFromItems}
                 className="flex items-center gap-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium px-3 py-2 rounded-lg transition-colors">
-                <Calculator className="h-3.5 w-3.5" />
-                Recalcular totales
+                <Calculator className="h-3.5 w-3.5" /> Recalcular totales
               </button>
               <button type="button" onClick={toggleDesglosarIVA}
-                title={ivaDesglosado ? 'Revertir a precios originales con IVA incluido' : 'Separa el IVA de los precios: precio neto = precio / 1.19'}
                 className={`flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-lg border transition-colors ${
                   ivaDesglosado
                     ? 'bg-green-50 hover:bg-green-100 text-green-700 border-green-200'
@@ -482,20 +562,25 @@ export default function NewOrderPage() {
               </button>
             </div>
 
-            {/* Resumen de totales */}
-            <div className="space-y-1 text-sm w-64">
+            <div className="space-y-1 text-sm w-72">
               <div className="flex justify-between text-gray-500">
                 <span>Subtotal productos</span>
                 <span className="font-medium">{formatCurrency(sumItems)}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-500">Total Neto</span>
+                <span className="text-gray-500">Subtotal</span>
                 <input type="number" value={form.totalNet}
                   onChange={e => setForm(f => ({ ...f, totalNet: parseFloat(e.target.value) || 0 }))}
                   className="w-32 px-2 py-0.5 text-xs border rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500" />
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-gray-500">IVA 19%</span>
+                <span className="text-gray-500">Descuentos</span>
+                <input type="number" value={form.discounts}
+                  onChange={e => setForm(f => ({ ...f, discounts: parseFloat(e.target.value) || 0 }))}
+                  className="w-32 px-2 py-0.5 text-xs border rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-500">Impuestos (IVA 19%)</span>
                 <input type="number" value={form.iva}
                   onChange={e => {
                     const iva = parseFloat(e.target.value) || 0
@@ -504,9 +589,24 @@ export default function NewOrderPage() {
                   className="w-32 px-2 py-0.5 text-xs border rounded text-right focus:outline-none focus:ring-1 focus:ring-blue-500" />
               </div>
               <div className="flex justify-between border-t pt-1">
-                <span className="font-bold text-gray-800">Total Final</span>
-                <span className="font-bold text-blue-700 text-base">{formatCurrency(form.totalNet + form.iva)}</span>
+                <span className="font-bold text-gray-800">Total Orden</span>
+                <span className="font-bold text-blue-700 text-base">{formatCurrency(form.totalNet - form.discounts + form.iva)}</span>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Sección 6: Observaciones ── */}
+        <div className="bg-white rounded-xl border p-5 space-y-4">
+          <h2 className="font-semibold text-gray-700 text-sm uppercase tracking-wide">Observaciones</h2>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={LABEL}>Observaciones</label>
+              <textarea value={form.observations} onChange={e => setField('observations', e.target.value)} rows={3} className={INPUT} />
+            </div>
+            <div>
+              <label className={LABEL}>Restricciones / Horarios Entrega</label>
+              <textarea value={form.deliveryRestrictions} onChange={e => setField('deliveryRestrictions', e.target.value)} rows={3} className={INPUT} placeholder="Lunes a jueves 08:30/16:00 hrs..." />
             </div>
           </div>
         </div>

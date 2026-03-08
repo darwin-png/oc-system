@@ -21,18 +21,30 @@ model User {
 model Order {
   id                   String      @id @default(cuid())
   ocNumber             String      @unique
+  status               String      @default("INGRESADA")
   ocDate               DateTime
+  sentDate             DateTime?
+  acceptanceDate       DateTime?
+  expectedDeliveryDate DateTime?
   buyerName            String
   buyerRut             String
+  buyerInstitution     String?
   deliveryAddress      String
+  deliveryCity         String?
+  deliveryRegion       String?
   billingAddress       String      @default("")
+  supplierName         String?
+  supplierRut          String?
+  supplierContact      String?
+  supplierPhone        String?
+  supplierEmail        String?
+  currency             String      @default("CLP")
   totalNet             Float
+  discounts            Float       @default(0)
   iva                  Float
   totalFinal           Float
-  status               String      @default("INGRESADA")
   observations         String?
   deliveryRestrictions String?
-  expectedDeliveryDate DateTime?
   requiresValidation   Boolean     @default(false)
   createdAt            DateTime    @default(now())
   updatedAt            DateTime    @updatedAt
