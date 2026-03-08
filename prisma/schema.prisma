@@ -43,6 +43,8 @@ model Order {
   discounts            Float       @default(0)
   iva                  Float
   totalFinal           Float
+  ocName               String?
+  paymentTerms         String?
   observations         String?
   deliveryRestrictions String?
   requiresValidation   Boolean     @default(false)

@@ -55,12 +55,14 @@ export default function NewOrderPage() {
   const [form, setForm] = useState({
     // Orden
     ocNumber: '',
+    ocName: '',
     status: 'INGRESADA',
     ocDate: '',
     sentDate: '',
     acceptanceDate: '',
     expectedDeliveryDate: '',
     currency: 'CLP',
+    paymentTerms: '',
     // Comprador
     buyerName: '',
     buyerRut: '',
@@ -178,11 +180,13 @@ export default function NewOrderPage() {
       setForm(f => ({
         ...f,
         ocNumber: p.ocNumber || '',
+        ocName: p.ocName || '',
         ocDate: formatDateInput(p.ocDate || ''),
         sentDate: formatDateInput(p.sentDate || ''),
         acceptanceDate: formatDateInput(p.acceptanceDate || ''),
         expectedDeliveryDate: formatDateInput(p.expectedDeliveryDate || ''),
         currency: p.currency || f.currency,
+        paymentTerms: p.paymentTerms || '',
         buyerName: p.buyerName || '',
         buyerRut: p.buyerRut || '',
         buyerInstitution: p.buyerInstitution || '',
@@ -199,7 +203,7 @@ export default function NewOrderPage() {
         discounts: p.discounts ?? 0,
         iva,
         totalFinal,
-        observations: [p.ocName, p.observations].filter(Boolean).join(' | ') || '',
+        observations: p.observations || '',
         deliveryRestrictions: p.deliveryRestrictions || '',
         requiresValidation: (p.fieldsRequiringValidation?.length || 0) > 0,
       }))
@@ -375,12 +379,16 @@ export default function NewOrderPage() {
                 <option value="CERRADA">Cerrada</option>
               </select>
             </div>
+            <div className="col-span-2">
+              <label className={LABEL}>Nombre de la OC</label>
+              <input type="text" value={form.ocName} onChange={e => setField('ocName', e.target.value)} className={INPUT} placeholder="Ej: Adquisición de insumos médicos 2025" />
+            </div>
             <div>
               <label className={LABEL}>Fecha Emisión *</label>
               <input type="date" required value={form.ocDate} onChange={e => setField('ocDate', e.target.value)} className={INPUT} />
             </div>
             <div>
-              <label className={LABEL}>Fecha Envío</label>
+              <label className={LABEL}>Fecha Envío OC</label>
               <input type="date" value={form.sentDate} onChange={e => setField('sentDate', e.target.value)} className={INPUT} />
             </div>
             <div>
@@ -388,7 +396,7 @@ export default function NewOrderPage() {
               <input type="date" value={form.acceptanceDate} onChange={e => setField('acceptanceDate', e.target.value)} className={INPUT} />
             </div>
             <div>
-              <label className={LABEL}>Fecha Entrega</label>
+              <label className={LABEL}>Fecha Entrega Esperada</label>
               <input type="date" value={form.expectedDeliveryDate} onChange={e => setField('expectedDeliveryDate', e.target.value)} className={INPUT} />
             </div>
             <div>
@@ -399,6 +407,10 @@ export default function NewOrderPage() {
                 <option value="EUR">EUR — Euro</option>
                 <option value="UTM">UTM</option>
               </select>
+            </div>
+            <div>
+              <label className={LABEL}>Forma de Pago</label>
+              <input type="text" value={form.paymentTerms} onChange={e => setField('paymentTerms', e.target.value)} className={INPUT} placeholder="Ej: 30 días factura" />
             </div>
           </div>
         </div>
