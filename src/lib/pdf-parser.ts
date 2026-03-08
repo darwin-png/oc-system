@@ -302,23 +302,22 @@ export function parsePDFText(rawText: string): ParsedOC {
   return result
 }
 
-/**
- * Extrae productos de la tabla de Mercado Público.
- *
- * Estrategia: localizar cada código (XXXXXXX) en el texto y reconstruir el producto
- * a partir del contexto circundante, tolerando múltiples líneas entre los campos.
- *
- * Estructura en el texto extraído:
- *   [ID licitación]
- *   [NOMBRE PRODUCTO en mayúsculas - columna "Producto"]
- *   [CANTIDAD] (CODIGO) descripción esp.comprador;
- *   descripción esp.proveedor; dirección...
- *   PRECIO_UNITARIO 0,00 0,00 VALOR_TOTAL
- */
+// ─── PRODUCTOS: 3 estrategias en cascada ─────────────────────────────────────
+
 function parseProducts(text: string): ParsedProduct[] {
+  let products = strategyA_codes(text)
+  if (products.length === 0) products = strategyB_table(text)
+  if (products.length === 0) products = strategyC_numeric(text)
+  return products
+}
+
+/**
+ * Estrategia A: buscar códigos (XXXXXXX) en el texto.
+ * Precio flexible: acepta cualquier valor en columnas de descuento/cargo.
+ */
+function strategyA_codes(text: string): ParsedProduct[] {
   const products: ParsedProduct[] = []
   const seen = new Set<string>()
-
   const codePattern = /\((\d{6,8})\)/g
   let m: RegExpExecArray | null
 
@@ -327,41 +326,36 @@ function parseProducts(text: string): ParsedProduct[] {
     const codeStart = m.index
     const codeEnd = codeStart + m[0].length
 
-    // === Nombre del producto ===
-    // El nombre en "Esp. Comprador" viene inmediatamente después del código en la misma línea.
-    // También intentamos tomar el nombre de la columna "Producto" (antes de la cantidad).
-    const afterCodeLine = text.slice(codeEnd, codeEnd + 200)
+    // Nombre: texto inmediatamente después del código en la misma línea
+    const afterCodeLine = text.slice(codeEnd, codeEnd + 300)
     const nameFromCode = afterCodeLine.match(/^([^\n;(]{3,})/)
     const nameEspComprador = nameFromCode ? cleanProductName(nameFromCode[1]) : ''
     if (nameEspComprador.length < 3) continue
 
-    // === Cantidad ===
-    // Número que precede directamente al (CODIGO) en la misma línea o línea anterior
-    const beforeCode = text.slice(Math.max(0, codeStart - 150), codeStart)
+    // Cantidad: número que precede al código
+    const beforeCode = text.slice(Math.max(0, codeStart - 200), codeStart)
     const qtyM = beforeCode.match(/(\d{1,4})\s*$/)
     if (!qtyM) continue
     const qty = parseInt(qtyM[1])
     if (qty <= 0 || qty >= 10000) continue
 
-    // === Nombre de la columna "Producto" (mayúsculas, antes de la cantidad) ===
+    // Nombre de columna "Producto" (texto en mayúsculas antes de la cantidad)
     const beforeQty = beforeCode.slice(0, beforeCode.length - qtyM[0].length)
-    const productColM = beforeQty.match(/([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,\-\.]{4,})\s*$/)
-    const productName = productColM
-      ? cleanProductName(productColM[1])
-      : nameEspComprador
+    const productColM = beforeQty.match(/([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s,\-\.\/]{4,})\s*$/)
+    const productName = productColM ? cleanProductName(productColM[1]) : nameEspComprador
 
-    // === Precio ===
-    // Buscar dentro de los próximos 700 chars: "precio 0,00 0,00 total"
-    // El esp.proveedor (con dirección) puede ocupar 1-3 líneas intermedias.
-    const afterCode = text.slice(codeEnd, codeEnd + 700)
-    const priceM = afterCode.match(/([\d.]+,\d{2})\s+0[,.]00\s+0[,.]00\s+([\d.]+[,.]?\d*)/)
-      || afterCode.match(/([\d.]{3,})\s+0[,.]00\s+0[,.]00\s+([\d.]{3,})/)
+    // Precio: buscar en los próximos 800 chars
+    // Acepta: PRECIO DESCUENTO CARGO TOTAL (cualquier valor en descuento/cargo)
+    const afterCode = text.slice(codeEnd, codeEnd + 800)
+    const priceM = afterCode.match(/([\d.]+,\d{2})\s+[\d.,]+\s+[\d.,]+\s+([\d.]+,\d{2})/)
+      || afterCode.match(/([\d.]{3,})\s+[\d.,]+\s+[\d.,]+\s+([\d.]{3,})/)
+      // Fallback: solo dos números seguidos (precio unit y total)
+      || afterCode.match(/([\d.]+,\d{2})\s+([\d.]+,\d{2})/)
 
     if (!priceM) continue
-
     const unitPrice = parseChileanNumber(priceM[1])
     const total = parseChileanNumber(priceM[2])
-    if (unitPrice <= 0) continue
+    if (unitPrice <= 0 || unitPrice > 1_000_000_000) continue
 
     const key = `${code}-${qty}`
     if (!seen.has(key)) {
@@ -377,24 +371,98 @@ function parseProducts(text: string): ParsedProduct[] {
       })
     }
   }
+  return products
+}
 
-  // Fallback: si el patrón anterior no encontró nada, intentar patrón lineal compacto
+/**
+ * Estrategia B: detectar la sección de tabla por header y parsear filas.
+ * Formato esperado por línea: NOMBRE qty unitPrice discount cargo total
+ */
+function strategyB_table(text: string): ParsedProduct[] {
+  const products: ParsedProduct[] = []
+  const seen = new Set<string>()
+
+  // Localizar inicio de la tabla de productos
+  const tableStartMatch = text.search(/(Valor\s+Total|Precio\s+Unitario|ESPECIFICACIONES\s+DEL\s+PRODUCTO)/i)
+  if (tableStartMatch === -1) return []
+
+  // Localizar fin de tabla (sección de totales)
+  const tableEndMatch = text.search(/\bNeto\b\s*\$|\bTotal\s+Neto\b/i)
+  const tableText = text.slice(
+    tableStartMatch,
+    tableEndMatch > tableStartMatch ? tableEndMatch : tableStartMatch + 8000
+  )
+
+  // Patrón: línea con nombre + cantidad + precio_unit + descuento + cargo + total
+  const rowPattern = /^(.{5,}?)\s+(\d{1,4})\s+([\d.]+,\d{2})\s+[\d.,]+\s+[\d.,]+\s+([\d.]+,\d{2})\s*$/gm
+  let fm: RegExpExecArray | null
+  while ((fm = rowPattern.exec(tableText)) !== null) {
+    const name = cleanProductName(fm[1])
+    const qty = parseInt(fm[2])
+    const unitPrice = parseChileanNumber(fm[3])
+    const total = parseChileanNumber(fm[4])
+    if (name.length < 3 || qty <= 0 || qty >= 10000 || unitPrice <= 0) continue
+    const key = `${name.slice(0, 20)}-${qty}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      products.push({ productName: name, quantity: qty, unitPrice, totalPrice: total || qty * unitPrice, unit: 'UN', discount: 0 })
+    }
+  }
+
+  // Patrón alternativo: línea con PRECIO y TOTAL al final (sin descuento/cargo explícitos)
   if (products.length === 0) {
-    const pattern1 = /(\d{1,4})\s+\((\d{6,8})\)\s+([^\n(]{5,})(?:;[^\n]*)?\s+([\d.]{3,}[,\d]*)\s+0[,.]00\s+0[,.]00\s+([\d.]{3,}[,\d]*)/gm
-    let fm: RegExpExecArray | null
-    while ((fm = pattern1.exec(text)) !== null) {
-      const qty = parseFloat(fm[1])
-      const code = fm[2]
-      const name = cleanProductName(fm[3])
-      const unitPrice = parseChileanNumber(fm[4])
-      const total = parseChileanNumber(fm[5])
-      const key = `${code}-${qty}`
-      if (qty > 0 && qty < 100000 && name.length > 3 && unitPrice > 0 && !seen.has(key)) {
+    const rowPattern2 = /^(.{5,}?)\s+(\d{1,4})\s+([\d.]+,\d{2})\s+([\d.]+,\d{2})\s*$/gm
+    while ((fm = rowPattern2.exec(tableText)) !== null) {
+      const name = cleanProductName(fm[1])
+      const qty = parseInt(fm[2])
+      const unitPrice = parseChileanNumber(fm[3])
+      const total = parseChileanNumber(fm[4])
+      if (name.length < 3 || qty <= 0 || qty >= 10000 || unitPrice <= 0) continue
+      // Validar que total ≈ qty * unitPrice (margen 60%)
+      const expected = qty * unitPrice
+      if (total < expected * 0.4 || total > expected * 2.5) continue
+      const key = `${name.slice(0, 20)}-${qty}`
+      if (!seen.has(key)) {
         seen.add(key)
-        products.push({ productCode: code, productName: name, quantity: qty, unitPrice, totalPrice: total || qty * unitPrice, unit: 'UN', discount: 0 })
+        products.push({ productName: name, quantity: qty, unitPrice, totalPrice: total, unit: 'UN', discount: 0 })
       }
     }
   }
 
+  return products
+}
+
+/**
+ * Estrategia C: fallback numérico — buscar cualquier línea que tenga
+ * nombre, cantidad y dos precios donde total ≈ qty × precio.
+ */
+function strategyC_numeric(text: string): ParsedProduct[] {
+  const products: ParsedProduct[] = []
+  const seen = new Set<string>()
+
+  // Buscar desde después de SEÑOR(ES) para evitar el encabezado
+  const startIdx = text.search(/SE[ÑN]OR\s*\(ES\)/i)
+  const searchText = startIdx > -1 ? text.slice(startIdx) : text
+
+  // Patrón: texto + cantidad + precio_unit + total al final de línea
+  const linePattern = /([A-Za-záéíóúÁÉÍÓÚñÑ\w][^\n]{4,}?)\s{2,}(\d{1,4})\s+([\d.]+[,]\d{2})\s+([\d.]+[,]\d{2})\s*$/gm
+  let fm: RegExpExecArray | null
+  while ((fm = linePattern.exec(searchText)) !== null) {
+    const name = cleanProductName(fm[1])
+    const qty = parseInt(fm[2])
+    const unitPrice = parseChileanNumber(fm[3])
+    const total = parseChileanNumber(fm[4])
+    if (name.length < 4 || qty <= 0 || qty >= 10000 || unitPrice <= 0) continue
+    // Validar ratio total/expected
+    const expected = qty * unitPrice
+    if (expected === 0) continue
+    const ratio = total / expected
+    if (ratio < 0.5 || ratio > 2.0) continue
+    const key = `${name.slice(0, 20)}-${qty}`
+    if (!seen.has(key)) {
+      seen.add(key)
+      products.push({ productName: name, quantity: qty, unitPrice, totalPrice: total, unit: 'UN', discount: 0 })
+    }
+  }
   return products
 }
