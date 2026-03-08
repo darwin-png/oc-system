@@ -3,12 +3,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatCurrency } from '@/lib/utils'
-import { Upload, Plus, Trash2, AlertCircle, CheckCircle, Loader2, Calculator, SplitSquareHorizontal } from 'lucide-react'
+import { Upload, Plus, Trash2, AlertCircle, CheckCircle, Loader2, Calculator, SplitSquareHorizontal, FileText, PenLine, ArrowLeft } from 'lucide-react'
 
 interface ProductRow {
   productCode: string
   productName: string
-  description?: string
   quantity: number
   unitPrice: number
   totalPrice: number
@@ -41,56 +40,28 @@ const REGIONES_CHILE = [
   'Región de Magallanes y de la Antártica Chilena',
 ]
 
+const emptyForm = {
+  ocNumber: '', ocName: '', status: 'INGRESADA',
+  ocDate: '', sentDate: '', acceptanceDate: '', expectedDeliveryDate: '',
+  currency: 'CLP', paymentTerms: '',
+  buyerName: '', buyerRut: '', buyerInstitution: '', buyerPhone: '',
+  deliveryAddress: '', deliveryCity: '', deliveryRegion: '', billingAddress: '',
+  supplierName: '', supplierRut: '', supplierContact: '', supplierPhone: '', supplierEmail: '',
+  totalNet: 0, discounts: 0, iva: 0, totalFinal: 0,
+  observations: '', deliveryRestrictions: '', requiresValidation: false,
+}
+
 export default function NewOrderPage() {
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
-  const [tab, setTab] = useState<'manual' | 'pdf'>('manual')
+  const [step, setStep] = useState<'upload' | 'form'>('upload')
+  const [fromPDF, setFromPDF] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [loading, setLoading] = useState(false)
   const [pdfLoading, setPdfLoading] = useState(false)
-  const [pdfResult, setPdfResult] = useState<any>(null)
-  const [pdfRawText, setPdfRawText] = useState<string>('')
-  const [showDebug, setShowDebug] = useState(false)
   const [error, setError] = useState('')
 
-  const [form, setForm] = useState({
-    // Orden
-    ocNumber: '',
-    ocName: '',
-    status: 'INGRESADA',
-    ocDate: '',
-    sentDate: '',
-    acceptanceDate: '',
-    expectedDeliveryDate: '',
-    currency: 'CLP',
-    paymentTerms: '',
-    // Comprador
-    buyerName: '',
-    buyerRut: '',
-    buyerInstitution: '',
-    buyerPhone: '',
-    // Dirección
-    deliveryAddress: '',
-    deliveryCity: '',
-    deliveryRegion: '',
-    billingAddress: '',
-    // Proveedor
-    supplierName: '',
-    supplierRut: '',
-    supplierContact: '',
-    supplierPhone: '',
-    supplierEmail: '',
-    // Totales
-    totalNet: 0,
-    discounts: 0,
-    iva: 0,
-    totalFinal: 0,
-    // Otros
-    observations: '',
-    deliveryRestrictions: '',
-    requiresValidation: false,
-  })
-
+  const [form, setForm] = useState(emptyForm)
   const [items, setItems] = useState<ProductRow[]>([emptyProduct()])
   const [itemsOriginal, setItemsOriginal] = useState<ProductRow[] | null>(null)
   const ivaDesglosado = itemsOriginal !== null
@@ -158,37 +129,34 @@ export default function NewOrderPage() {
       if (data.error) { setError(data.error); return }
       const p = data.parsed
 
-      setPdfResult(p)
-      setPdfRawText(data.rawText || '')
-      setItemsOriginal(null)
-
       const parsedItems: ProductRow[] = p.products?.length > 0
         ? p.products.map((prod: any) => ({
             productCode: prod.productCode || '',
             productName: prod.productName || '',
-            description: prod.description || '',
             quantity: Number(prod.quantity) || 1,
             unitPrice: Number(prod.unitPrice) || 0,
             totalPrice: Number(prod.totalPrice) || Math.round((Number(prod.quantity) || 1) * (Number(prod.unitPrice) || 0)),
             unit: prod.unit || 'UN',
           }))
         : [emptyProduct()]
+
       setItems(parsedItems)
+      setItemsOriginal(null)
 
       const sumaProductos = parsedItems.reduce((s, i) => s + i.totalPrice, 0)
       const totalNet = p.totalNet || sumaProductos
       const totalFinal = p.totalFinal || (totalNet + Math.round(totalNet * 0.19))
       const iva = p.iva ?? (totalFinal - totalNet)
 
-      setForm(f => ({
-        ...f,
+      setForm({
         ocNumber: p.ocNumber || '',
         ocName: p.ocName || '',
+        status: 'INGRESADA',
         ocDate: formatDateInput(p.ocDate || p.sentDate || ''),
         sentDate: formatDateInput(p.sentDate || p.ocDate || ''),
         acceptanceDate: formatDateInput(p.acceptanceDate || ''),
         expectedDeliveryDate: formatDateInput(p.expectedDeliveryDate || ''),
-        currency: p.currency || f.currency,
+        currency: p.currency || 'CLP',
         paymentTerms: p.paymentTerms || '',
         buyerName: p.buyerName || '',
         buyerRut: p.buyerRut || '',
@@ -210,8 +178,10 @@ export default function NewOrderPage() {
         observations: p.observations || '',
         deliveryRestrictions: p.deliveryRestrictions || '',
         requiresValidation: (p.fieldsRequiringValidation?.length || 0) > 0,
-      }))
+      })
 
+      setFromPDF(true)
+      setStep('form')
     } catch {
       setError('Error procesando PDF')
     } finally {
@@ -280,83 +250,111 @@ export default function NewOrderPage() {
 
   const sumItems = items.reduce((s, i) => s + i.totalPrice, 0)
 
+  // ── PASO 1: Subir PDF ──────────────────────────────────────────────────────
+  if (step === 'upload') {
+    return (
+      <div className="p-6 max-w-3xl">
+
+        {isDragging && (
+          <div className="fixed inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+            <div className="bg-white rounded-2xl shadow-2xl border-4 border-blue-500 border-dashed p-16 flex flex-col items-center gap-4">
+              <Upload className="h-16 w-16 text-blue-500" />
+              <p className="text-2xl font-bold text-blue-700">Suelta el PDF aquí</p>
+            </div>
+          </div>
+        )}
+
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Nueva Orden de Compra</h1>
+          <p className="text-sm text-gray-500 mt-1">Sube el PDF de la OC o ingresa los datos manualmente</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          {/* Opción PDF */}
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={pdfLoading}
+            className="flex flex-col items-center gap-4 border-2 border-dashed border-blue-300 rounded-2xl p-10 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 transition-colors text-center disabled:opacity-60"
+          >
+            {pdfLoading
+              ? <Loader2 className="h-12 w-12 text-blue-400 animate-spin" />
+              : <FileText className="h-12 w-12 text-blue-500" />
+            }
+            <div>
+              <p className="font-semibold text-blue-700 text-base">
+                {pdfLoading ? 'Leyendo PDF...' : 'Subir PDF de la OC'}
+              </p>
+              <p className="text-xs text-blue-500 mt-1">
+                {pdfLoading ? 'Claude está extrayendo los datos' : 'Arrastra o haz clic · Formato .pdf'}
+              </p>
+            </div>
+          </button>
+          <input ref={fileRef} type="file" accept=".pdf" onChange={handlePDF} className="hidden" />
+
+          {/* Opción Manual */}
+          <button
+            type="button"
+            onClick={() => { setFromPDF(false); setStep('form') }}
+            className="flex flex-col items-center gap-4 border-2 border-dashed border-gray-200 rounded-2xl p-10 bg-gray-50 hover:bg-gray-100 hover:border-gray-300 transition-colors text-center"
+          >
+            <PenLine className="h-12 w-12 text-gray-400" />
+            <div>
+              <p className="font-semibold text-gray-700 text-base">Ingresar manualmente</p>
+              <p className="text-xs text-gray-400 mt-1">Completa los campos uno a uno</p>
+            </div>
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-4 flex gap-2 bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />{error}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── PASO 2: Formulario editable ────────────────────────────────────────────
   return (
     <div className="p-6 max-w-5xl space-y-5">
 
-      {/* Overlay pantalla completa al arrastrar */}
       {isDragging && (
         <div className="fixed inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
           <div className="bg-white rounded-2xl shadow-2xl border-4 border-blue-500 border-dashed p-16 flex flex-col items-center gap-4">
             <Upload className="h-16 w-16 text-blue-500" />
             <p className="text-2xl font-bold text-blue-700">Suelta el PDF aquí</p>
-            <p className="text-sm text-gray-500">Se extraerán todos los datos de la OC automáticamente</p>
           </div>
         </div>
       )}
 
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Nueva Orden de Compra</h1>
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="flex items-center gap-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-        >
-          <Upload className="h-4 w-4" />
-          Subir PDF
-        </button>
+        <div className="flex items-center gap-3">
+          <button type="button" onClick={() => { setStep('upload'); setError('') }}
+            className="text-gray-400 hover:text-gray-600 transition-colors">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Nueva Orden de Compra</h1>
+            {fromPDF && (
+              <p className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
+                <CheckCircle className="h-3.5 w-3.5" />
+                Datos cargados desde PDF — revisa y edita si es necesario
+              </p>
+            )}
+          </div>
+        </div>
+        {fromPDF && (
+          <button type="button" onClick={() => fileRef.current?.click()}
+            disabled={pdfLoading}
+            className="flex items-center gap-2 text-xs bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-medium px-3 py-2 rounded-lg transition-colors disabled:opacity-60">
+            {pdfLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+            {pdfLoading ? 'Leyendo...' : 'Cambiar PDF'}
+          </button>
+        )}
         <input ref={fileRef} type="file" accept=".pdf" onChange={handlePDF} className="hidden" />
       </div>
-
-      {/* Alertas PDF */}
-      {pdfResult && pdfResult.fieldsRequiringValidation?.length > 0 && (
-        <div className="flex gap-2 bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-          <AlertCircle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-medium text-yellow-800">Campos que requieren revisión manual</p>
-            <p className="text-xs text-yellow-600 mt-0.5">{pdfResult.fieldsRequiringValidation.join(', ')}</p>
-          </div>
-        </div>
-      )}
-      {pdfResult && pdfResult.fieldsRequiringValidation?.length === 0 && (
-        <div className="flex gap-2 bg-green-50 border border-green-200 rounded-lg p-3">
-          <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
-          <p className="text-sm text-green-800 font-medium">PDF leído correctamente — {items.length} producto(s) cargados.</p>
-        </div>
-      )}
-
-      {/* Debug PDF */}
-      {pdfResult && (
-        <div className="border rounded-lg overflow-hidden text-xs">
-          <button type="button" onClick={() => setShowDebug(v => !v)}
-            className="w-full flex items-center justify-between px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium">
-            <span>🔍 Debug extracción PDF</span>
-            <span>{showDebug ? '▲ Ocultar' : '▼ Ver'}</span>
-          </button>
-          {showDebug && (
-            <div className="grid grid-cols-2 divide-x bg-white">
-              <div className="p-4 space-y-1 overflow-auto max-h-80">
-                <p className="font-semibold text-gray-700 mb-2">Campos extraídos</p>
-                {Object.entries(pdfResult).filter(([k]) => k !== 'products' && k !== 'fieldsRequiringValidation').map(([k, v]) => (
-                  <div key={k} className="flex gap-2">
-                    <span className="text-gray-400 w-36 shrink-0">{k}:</span>
-                    <span className="text-gray-800 break-all">{String(v ?? '—')}</span>
-                  </div>
-                ))}
-                <div className="mt-2 font-semibold text-gray-700">Productos ({pdfResult.products?.length ?? 0})</div>
-                {pdfResult.products?.map((p: any, i: number) => (
-                  <div key={i} className="pl-2 border-l-2 border-blue-200 text-gray-600">
-                    [{i+1}] ({p.productCode}) {p.productName} — qty:{p.quantity} price:{p.unitPrice}
-                  </div>
-                ))}
-              </div>
-              <div className="p-4 overflow-auto max-h-80">
-                <p className="font-semibold text-gray-700 mb-2">Texto crudo del PDF</p>
-                <pre className="whitespace-pre-wrap text-gray-500 leading-relaxed">{pdfRawText}</pre>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
 
